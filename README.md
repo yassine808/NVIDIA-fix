@@ -1,7 +1,7 @@
 # nvidia-fix
 
 Recover the clean tail of an NVIDIA ShadowPlay recording that was corrupted by an
-in-place overwrite.
+in-place overwrite. Includes a native Windows desktop app.
 
 The failure this tool targets: a recording is created, then the recorder replaces its
 beginning with a later chunk of the same recording. The MP4 index still describes the
@@ -25,32 +25,52 @@ For an input named `clip.mp4`:
 Existing files are never overwritten. A second run produces `clip.clean-2.mp4`, etc.
 The input file is opened read-only.
 
+## Desktop app (Windows)
+
+Download **[NVIDIA-Fix.exe](https://github.com/yassine808/NVIDIA-fix/releases/latest/download/NVIDIA-Fix.exe)**
+from the latest release.
+
+1. Install ffmpeg/ffprobe and make sure `ffmpeg -version` works in a terminal:
+   `winget install Gyan.FFmpeg`
+2. Run `NVIDIA-Fix.exe`, choose the corrupted recording, and choose where the
+   recovered files should go (defaults to the input folder).
+3. Click **Recover clean tail**. When it finishes, use **Play video**,
+   **Open folder**, or **Report**.
+
+The desktop app uses the same verified engine as the CLI. It does not modify the
+input. The `.exe` does not bundle ffmpeg; it uses the copy on `PATH`.
+
+To run the desktop app from source instead:
+
+```powershell
+python desktop.py
+```
+
+or double-click `NVIDIA-Fix.pyw` (uses `pythonw`, so no console window). The desktop
+app itself needs only Python 3.9+ and ffmpeg/ffprobe; Flask is only for the optional
+web UI.
+
+### Build the desktop executable
+
+```powershell
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --windowed --name "NVIDIA-Fix" `
+  --icon assets\nvidia-fix.ico `
+  --add-data "assets\nvidia-fix.ico;assets" `
+  desktop.py
+```
+
+The result is `dist\NVIDIA-Fix.exe`. The executable still expects ffmpeg/ffprobe on
+`PATH`.
+
 ## Requirements
 
-- Python 3.9 or newer
-- Flask 3.1 (installed from `requirements.txt`)
-- `ffmpeg` and `ffprobe` 6.0 or newer on `PATH`
+- Desktop: Windows 10/11, `ffmpeg` and `ffprobe` 6.0 or newer on `PATH`
+- Source/CLI: Python 3.9 or newer, plus ffmpeg/ffprobe
+- Optional web UI: Flask 3.1 (installed from `requirements.txt`)
 
 On Windows, install ffmpeg with `winget install Gyan.FFmpeg` (or download a build from
 <https://ffmpeg.org/download.html>) and reopen the terminal so `ffmpeg -version` works.
-
-## Install and run the web app
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python app.py
-```
-
-Open <http://127.0.0.1:5000>, drop the recording, and wait. Processing is local and
-synchronous; a large recording can take a minute because the result is decoded to
-verify it. Uploads are limited to 8 GB by default:
-
-```powershell
-$env:NVIDIA_FIX_MAX_UPLOAD_MB = "20000"
-python app.py
-```
 
 ## CLI
 
@@ -71,6 +91,24 @@ python nvidia_fix.py fix "D:\Videos\clip.mp4" --json
 
 Exit codes: `0` success (including an already-healthy file), `2` a handled error such
 as unsupported codec or no clean keyframe.
+
+## Optional web UI
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+```
+
+Open <http://127.0.0.1:5000>, drop the recording, and wait. Processing is local and
+synchronous; a large recording can take a minute because the result is decoded to
+verify it. Uploads are limited to 8 GB by default:
+
+```powershell
+$env:NVIDIA_FIX_MAX_UPLOAD_MB = "20000"
+python app.py
+```
 
 ## How the boundary is found
 
@@ -125,7 +163,8 @@ python -m unittest discover -s tests -v
 ```
 
 The suite generates its own clean and deliberately corrupted clips with ffmpeg and
-exercises the detector, cutter, audio export, and Flask upload flow. To run the
+exercises the detector, cutter, audio export, Flask upload flow, and the desktop UI
+(hidden window). The desktop test is skipped if Tk is unavailable. To run the
 real-recording integration test:
 
 ```powershell

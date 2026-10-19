@@ -4,6 +4,9 @@ __pycache__/
 venv/
 instance/
 .pytest_cache/
+build/
+dist/
+*.spec
 *.part.mp4
 
 # never commit recordings or recovered media

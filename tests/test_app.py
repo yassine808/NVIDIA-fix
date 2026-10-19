@@ -66,9 +66,13 @@ class RecoveryTests(unittest.TestCase):
     def test_recovers_tail(self):
         before = sha256(self.corrupt)
         out = TEMP_ROOT / "recovered"
-        result = nvidia_fix.process(self.corrupt, out_dir=out, full_decode=True)
+        messages = []
+        result = nvidia_fix.process(
+            self.corrupt, out_dir=out, full_decode=True, progress=messages.append
+        )
 
         self.assertEqual(result["status"], "success")
+        self.assertTrue(any("Cutting the clean tail" in m for m in messages))
         video = result["recovery"]["video"]
         self.assertGreaterEqual(video["packets"], 100)
         self.assertEqual(video["decode_errors"], 0)

@@ -28,7 +28,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 TOOL = "nvidia-fix"
 VERSION = "1.0.0"
@@ -505,13 +505,29 @@ def _probe_duration(path: Path) -> float:
 # main workflow
 # --------------------------------------------------------------------------
 
+ProgressCallback = Callable[[str], None]
+
+
+def _notify(progress: Optional[ProgressCallback], message: str) -> None:
+    if progress is None:
+        return
+    try:
+        progress(message)
+    except Exception:
+        # A UI callback must never break recovery.
+        pass
+
+
 def process(path: str | Path, out_dir: Optional[str | Path] = None,
-            full_decode: bool = True) -> Dict[str, object]:
+            full_decode: bool = True,
+            progress: Optional[ProgressCallback] = None) -> Dict[str, object]:
     source = Path(path).expanduser().resolve()
+    _notify(progress, "Reading the container and scanning every video sample…")
     analysis = analyze(source)
     analysis_doc = analysis.to_dict()
 
     if analysis.healthy:
+        _notify(progress, "No corruption detected. The file is already intact.")
         return {
             **analysis_doc,
             "status": "healthy",
@@ -526,6 +542,12 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             "corruption may extend to the end of the file, so no clean tail can "
             "be recovered."
         )
+
+    _notify(
+        progress,
+        f"Found {analysis.bad_samples:,} damaged samples. "
+        f"First clean keyframe: {analysis.candidates[0].pts:.3f} s.",
+    )
 
     destination = Path(out_dir).expanduser().resolve() if out_dir else source.parent
     destination.mkdir(parents=True, exist_ok=True)
@@ -544,11 +566,18 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
     for attempt, candidate in enumerate(analysis.candidates, start=1):
         temp = destination / f"{base}.try{attempt}.part.mp4"
         try:
+            _notify(
+                progress,
+                f"Cutting the clean tail from {candidate.pts:.3f} s "
+                f"(candidate {attempt} of {len(analysis.candidates)})…",
+            )
             _cut_tail(source, candidate, temp)
+            _notify(progress, "Verifying that the cut starts on the exact source packet…")
             check = _verify_first_packet(source, candidate, temp)
             if not check.get("ok"):
                 attempts.append({"seconds": _t(candidate.pts), "error": check.get("reason")})
                 continue
+            _notify(progress, "Checking the first seconds of the recovered video…")
             first_errors = _decode_errors(temp, DECODE_VALIDATE_SECONDS)
             if first_errors:
                 attempts.append({
@@ -574,6 +603,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
     audio_info = None
     if analysis.media.get("audio"):
         try:
+            _notify(progress, "Exporting the audio from before the cut…")
             _export_early_audio(source, accepted.pts, audio_out)
             audio_info = {
                 "name": audio_out.name,
@@ -587,6 +617,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
 
     decode_errors: List[str] = []
     if full_decode:
+        _notify(progress, "Decoding the recovered video to verify it…")
         decode_errors = _decode_errors(video_out)
 
     duration = _probe_duration(video_out)
@@ -621,6 +652,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             "decode reported errors. Inspect the decode_error_sample list."
         )
 
+    _notify(progress, "Writing the recovery report…")
     report_out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     return {
         **report,
