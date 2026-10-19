@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Recovery result{% endblock %}
+{% block content %}
+  {% set video = result.recovery.video %}
+  {% set corruption = result.corruption %}
+  {% if result.status == 'success' %}
+    <div class="status ok">● Verified clean</div>
+  {% else %}
+    <div class="status warn">● Recovered with warnings</div>
+  {% endif %}
+
+  <h1>Clean tail <span>recovered</span>.</h1>
+  <p class="lede">
+    {{ result.original_name }} — footage from
+    <strong>{{ corruption.clean_start_seconds|timecode }}</strong> onward is intact.
+    The early overwritten section was not reused.
+  </p>
+
+  {% if result.warning and result.status != 'success' %}
+    <div class="notice error">{{ result.warning }}</div>
+  {% endif %}
+
+  <div class="stats">
+    <div class="stat"><div class="k">Clean start</div><div class="v">{{ corruption.clean_start_seconds|timecode }}</div></div>
+    <div class="stat"><div class="k">Recovered</div><div class="v">{{ video.duration_seconds|timecode }}</div></div>
+    <div class="stat"><div class="k">Damaged samples</div><div class="v">{{ "{:,}".format(corruption.bad_samples) }}</div></div>
+    <div class="stat"><div class="k">Decode errors</div><div class="v">{{ video.decode_errors }}</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title" style="margin-top:0">Downloads</div>
+    <div class="downloads">
+      {% for entry in result.downloads %}
+        <a class="dl" href="{{ url_for('download', job=job, name=entry.name) }}">
+          <span>
+            <b>{{ entry.label }}</b>
+            <small>{{ entry.detail }}{% if entry.size_bytes %} · {{ entry.size_bytes|filesize }}{% endif %}</small>
+          </span>
+          <span class="go">Download ↓</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="section-title">What was verified</div>
+  <ul class="evidence">
+    <li>Every video sample after the boundary passed the H.264 NAL header check.</li>
+    <li>The first output packet is byte-identical to the source sample at <code>{{ corruption.clean_start_seconds }}</code> s (SHA-256 <code>{{ (video.first_packet_sha256 or '')[:16] }}…</code>).</li>
+    <li>{% if video.decode_errors == 0 %}A full decode of the recovered video reported zero errors.{% else %}The cut verified, but the full decode reported {{ video.decode_errors }} error line(s).{% endif %}</li>
+    <li>The tail contains {{ "{:,}".format(video.packets) }} video packets and was stream-copied, not re-encoded.</li>
+  </ul>
+
+  <p class="caveat">
+    <strong>What is still gone:</strong> the {{ corruption.last_bad_seconds|timecode }} s
+    before the boundary were overwritten in the recorder's file. Only the surviving
+    audio from that section is included. No tool can rebuild the missing frames from
+    this file.
+  </p>
+
+  <div class="actions">
+    <a class="btn" href="{{ url_for('index') }}">Recover another file</a>
+  </div>
+{% endblock %}

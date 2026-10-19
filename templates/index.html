@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}NVIDIA ShadowPlay Recovery{% endblock %}
+{% block content %}
+  <h1>Recover the <span>clean tail</span>.</h1>
+  <p class="lede">
+    NVIDIA ShadowPlay can overwrite the beginning of a recording with a later chunk of
+    itself. The file still contains a perfectly good ending. This tool finds the last
+    damaged sample, cuts from the next intact keyframe, and keeps every recoverable
+    frame — without re-encoding.
+  </p>
+
+  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+  {% if healthy %}<div class="notice good">{{ healthy }}</div>{% endif %}
+
+  <form class="panel" method="post" action="{{ url_for('fix') }}" enctype="multipart/form-data" id="fix-form">
+    <label class="drop" id="drop">
+      <strong>Drop a recording here</strong>
+      <span>or click to choose an MP4 / MOV · H.264 · up to {{ max_upload_mb }} MB</span>
+      <input type="file" name="video" id="video" accept=".mp4,.mov,.m4v,video/mp4,video/quicktime" required>
+    </label>
+    <div class="filename" id="filename"></div>
+    <div class="actions">
+      <button type="submit" id="submit" disabled>Recover clean tail</button>
+      <span class="hint">The original file is never modified. Outputs get unique names.</span>
+    </div>
+  </form>
+
+  <div class="grid3">
+    <div class="mini"><b>Clean tail MP4</b><p>Stream-copied from the first intact IDR. Same codec, same quality, no generation loss.</p></div>
+    <div class="mini"><b>Early audio</b><p>The audio that survives before the cut, exported separately so it is not lost.</p></div>
+    <div class="mini"><b>Evidence report</b><p>Boundary timestamps, sample counts, packet hash match and decode verification in JSON.</p></div>
+  </div>
+
+  <div class="section-title">How it works</div>
+  <div class="steps">
+    <div class="step"><div class="n">01</div><h3>Scan every sample</h3><p>Each H.264 packet is checked for a valid length-prefixed NAL header, without decoding the video.</p></div>
+    <div class="step"><div class="n">02</div><h3>Find the boundary</h3><p>The last damaged sample is located, then the first clean keyframe after it with a stable run of valid samples.</p></div>
+    <div class="step"><div class="n">03</div><h3>Cut and verify</h3><p>The tail is stream-copied. The first output packet must match the source byte-for-byte, then the result is decoded.</p></div>
+  </div>
+
+  <p class="caveat">
+    <strong>Honest limitation:</strong> video before the boundary was overwritten in place.
+    It cannot be reconstructed from this file. The app recovers the intact tail and all
+    surviving audio — not the lost frames.
+  </p>
+{% endblock %}
+{% block scripts %}
+<script>
+  const input = document.getElementById('video');
+  const drop = document.getElementById('drop');
+  const name = document.getElementById('filename');
+  const submit = document.getElementById('submit');
+  const form = document.getElementById('fix-form');
+
+  function chose() {
+    if (input.files.length) {
+      name.textContent = input.files[0].name + ' · ' + (input.files[0].size / 1048576).toFixed(1) + ' MB';
+      submit.disabled = false;
+    } else {
+      name.textContent = '';
+      submit.disabled = true;
+    }
+  }
+  input.addEventListener('change', chose);
+
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('dragging'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('dragging'); });
+  });
+  drop.addEventListener('drop', function (e) {
+    if (e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      chose();
+    }
+  });
+
+  form.addEventListener('submit', function () {
+    if (!input.files.length) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay on';
+    overlay.innerHTML = '<div><div class="spinner"></div><b>Scanning and rebuilding…</b><span>Large recordings can take a minute. Keep this tab open.</span></div>';
+    document.body.appendChild(overlay);
+    submit.disabled = true;
+  });
+</script>
+{% endblock %}
