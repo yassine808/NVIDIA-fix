@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 TOOL = "nvidia-fix"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
 FFPROBE = os.environ.get("FFPROBE_BINARY", "ffprobe")

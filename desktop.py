@@ -989,6 +989,7 @@ def main(argv=None) -> int:
     )
 
     if args.smoke_test:
+        root.withdraw()
         if args.auto_start and args.input:
             root.after(600, app._start_recovery)
             root.after(180000, root.destroy)

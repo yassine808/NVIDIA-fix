@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: 1 / Quality and docs
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+      - name: Byte-compile every Python entry point
+        run: python -m compileall -q nvidia_fix.py desktop.py app.py tests scripts
+      - name: Check the public CLI version
+        run: python nvidia_fix.py --version
+      - name: Check required release files
+        run: |
+          python -c "from pathlib import Path; readme = Path('README.md').read_text(encoding='utf-8'); assert 'releases/latest' in readme, 'README download link missing'; assert Path('LICENSE').is_file(), 'LICENSE missing'; assert Path('docs/screenshots/app.png').is_file(), 'app screenshot missing'; assert Path('docs/screenshots/result.png').is_file(), 'result screenshot missing'; print('release files OK')"
+
+  unit:
+    name: 2 / Unit and integration tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+      - name: Verify ffmpeg is available
+        run: ffmpeg -version
+      - name: Run the full test suite
+        run: python -m unittest discover -s tests -v
+
+  desktop:
+    name: 3 / Desktop UI
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+      - name: Exercise the hidden desktop window
+        run: python -m unittest tests.test_desktop -v
+      - name: Run the packaged-UI smoke path
+        run: python desktop.py --smoke-test
+
+  cli:
+    name: 4 / CLI recovery
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+      - name: Recover a synthetic corrupted recording through the CLI
+        run: python scripts/ci_e2e.py
+
+  package:
+    name: 5 / Windows executable
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt pyinstaller
+      - name: Build the one-file Windows executable
+        run: pyinstaller --noconfirm --onefile --windowed --name "NVIDIA-Fix" --icon assets\nvidia-fix.ico --add-data "assets\nvidia-fix.ico;assets" desktop.py
+      - name: Create a synthetic corrupted recording
+        run: python scripts/make_fixture.py "$env:RUNNER_TEMP\ci-fixture.mp4"
+      - name: Smoke-test the executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "dist\NVIDIA-Fix.exe"
+          if (-not (Test-Path $exe)) { throw "executable was not built" }
+          & $exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "EXE smoke test exited with $LASTEXITCODE" }
+          Write-Host "EXE smoke test OK"
+      - name: Recover the fixture through the executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "dist\NVIDIA-Fix.exe"
+          $fixture = Join-Path $env:RUNNER_TEMP "ci-fixture.mp4"
+          $out = Join-Path $env:RUNNER_TEMP "ci-exe-output"
+          & $exe --smoke-test --auto-start $fixture --output $out
+          if ($LASTEXITCODE -ne 0) { throw "EXE recovery exited with $LASTEXITCODE" }
+          $video = Get-ChildItem -Path $out -Filter "*.clean.mp4" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $report = Get-ChildItem -Path $out -Filter "*.report.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $video) { throw "no recovered video was written" }
+          if (-not $report) { throw "no recovery report was written" }
+          $doc = Get-Content $report.FullName -Raw | ConvertFrom-Json
+          if ($doc.status -ne "success") { throw "report status was $($doc.status)" }
+          if ($doc.recovery.video.decode_errors -ne 0) { throw "decode errors: $($doc.recovery.video.decode_errors)" }
+          Write-Host "EXE recovery OK: $($video.Name) ($($video.Length) bytes)"
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: NVIDIA-Fix-windows
+          path: dist/NVIDIA-Fix.exe
+          if-no-files-found: error

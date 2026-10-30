@@ -10,6 +10,7 @@ dist/
 *.part.mp4
 
 # never commit recordings or recovered media
+recovery/
 *.mp4
 *.mov
 *.m4v
