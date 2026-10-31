@@ -154,9 +154,23 @@ not file damage), no unclassified output, no retry attempts needed.
       no ffmpeg required).
 - [ ] Still open: co64 fixture expectations and a duplication regression test
       built from a synthesized prefix/tail pair.
-- [ ] Commit + push.
+- [x] Commit + push (1.1.1, `2863c0d`).
 
 ## Mission log
+
+### 2026-10-31 — session 2 close-out: the fixes are published
+
+- Committed the verifier / `parse_stss` / `Reader` fixes as `2863c0d`
+  ("Fix three false-verdict bugs in the recovery engine (1.1.1)") and pushed
+  `main` (`167c525..2863c0d`), which also carried the unpushed `21fb2a2`
+  forensics-toolkit commit.
+- Verified before committing: `python tests/test_parsers.py` → 6 tests, OK.
+  The 1.1.1 version has a single source (`nvidia_fix.VERSION`); `desktop.py`
+  reads it, so nothing else needed bumping.
+- The real-file recovery in `recovery/out_v2/` was **not** re-run this session.
+  Its numbers stand from session 2: 185.981 s, 22,318 packets, 0 decoder errors.
+- Next: `--explain` duplication verdict (then desktop.py + README surfacing),
+  the co64/duplication regression tests, and a donor source for 0–113.782 s.
 
 ### 2026-10-31 — session 2 (goal reopened to 100%)
 
