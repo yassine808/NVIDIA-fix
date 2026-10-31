@@ -14,6 +14,7 @@ node_modules/
 
 # never commit recordings or recovered media
 recovery/
+video test/
 *.mp4
 *.mov
 *.m4v
