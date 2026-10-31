@@ -142,6 +142,19 @@
     details li { margin: 4px 0; }
     .caveat { margin: 10px 0 14px; color: var(--m); font-size: 14px; }
 
+    /* healthy (already intact) */
+    .okmark { width: 104px; height: 104px; border-radius: 50%; border: 2px solid var(--g); position: relative; margin-bottom: 28px;
+      box-shadow: 0 0 0 10px rgba(118,185,0,.08), 0 0 60px rgba(118,185,0,.18); }
+    .okmark::after { content: ""; position: absolute; left: 33px; top: 20px; width: 22px; height: 44px;
+      border: solid var(--g); border-width: 0 6px 6px 0; transform: rotate(45deg); }
+    .ok-note { color: var(--m); font-size: 18px; margin-bottom: 32px; }
+    .res.healthy { grid-template-columns: 1fr; align-content: center; justify-items: center; text-align: center; gap: 0; padding-top: 0; }
+    .res.healthy .col { display: flex; flex-direction: column; align-items: center; }
+    .res.healthy h1 { font-size: 56px; margin-bottom: 14px; }
+    .res.healthy .lede { background: var(--p); border-left: 3px solid var(--g); padding: 8px 18px; margin: 0 0 18px; max-width: 760px; font-size: 16px; }
+    .res.healthy .lede:empty { display: none; }
+    .res.healthy .btn { font-size: 18px; padding: 16px 40px; }
+
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   </style>
 </head>
@@ -210,9 +223,11 @@
 
     <main class="res" id="result" hidden>
       <div class="col">
+        <div class="okmark" id="res-ok" hidden></div>
         <div class="chip" id="res-chip"></div>
         <h1 id="res-title">Clean video recovered.</h1>
         <p class="lede" id="res-name"></p>
+        <p class="ok-note" id="res-ok-note" hidden>This file is already intact. Nothing was changed.</p>
 
         <div class="notice" id="res-warning" hidden></div>
 
@@ -376,12 +391,14 @@
         var warning = $('#res-warning'), legend = $('#res-legend'), stats = $('#res-stats');
         var filesWrap = $('#res-files-wrap'), caveat = $('#res-caveat'), details = $('#res-details');
         var lostStrip = $('#res-strip'), fileBox = $('#res-files');
+        var okMark = $('#res-ok'), okNote = $('#res-ok-note');
+        var isHealthy = r.status === 'healthy';
+        result.classList.toggle('healthy', isHealthy);
+        okMark.hidden = !isHealthy; okNote.hidden = !isHealthy; chip.hidden = isHealthy;
 
         if (r.status === 'healthy') {
-          chip.className = 'chip';
-          chip.textContent = 'Already intact';
           title.textContent = 'No corruption detected.';
-          name.textContent = r.message || 'This file needs no recovery.';
+          name.textContent = r.original_name || '';
           [lostStrip, legend, stats, filesWrap, caveat, details, warning].forEach(function (el) { el.hidden = true; });
           return;
         }
