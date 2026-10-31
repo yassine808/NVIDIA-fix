@@ -1,88 +1,387 @@
-{% extends "base.html" %}
-{% block title %}NVIDIA ShadowPlay Recovery{% endblock %}
-{% block content %}
-  <h1>Recover the <span>clean tail</span>.</h1>
-  <p class="lede">
-    NVIDIA ShadowPlay can overwrite the beginning of a recording with a later chunk of
-    itself. The file still contains a perfectly good ending. This tool finds the last
-    damaged sample, cuts from the next intact keyframe, and keeps every recoverable
-    frame — without re-encoding.
-  </p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nvidia-fix</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Crect width='8' height='8' fill='%2376B900'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --g: #76B900; --g2: #BFF230; --gd: #3F8500;
+      --k: #000; --p: #1A1A1A; --ln: #333;
+      --t: #fff; --m: #A7A7A7; --d: #5E5E5E;
+      --bad: #E52020; --warn: #F9C500;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; }
+    body {
+      background: var(--k); color: var(--t); min-height: 100vh;
+      font: 400 16px/1.5 Barlow, Bahnschrift, "DIN Alternate", "Segoe UI", system-ui, sans-serif;
+      font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 32px 24px 72px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 72px; color: var(--d); font-size: 14px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--t); font-weight: 600; font-size: 17px; }
+    .mark { width: 22px; height: 22px; background: var(--g); clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%); }
+    h1 { font-size: clamp(42px, 8vw, 76px); line-height: 1; letter-spacing: -.025em; font-weight: 600; margin: 0 0 40px; }
+    h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; color: var(--m); }
+    p { margin: 0; }
+    a { color: var(--g); }
+    :focus-visible { outline: 2px solid var(--t); outline-offset: 3px; }
 
-  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
-  {% if healthy %}<div class="notice good">{{ healthy }}</div>{% endif %}
+    /* buttons */
+    button { font: inherit; cursor: pointer; }
+    .btn {
+      appearance: none; border: 0; border-radius: 2px; background: var(--g); color: var(--k);
+      font-weight: 700; font-size: 17px; padding: 14px 30px; text-decoration: none; display: inline-block;
+      transition: background .15s;
+    }
+    .btn:hover { background: var(--g2); }
+    .btn:disabled { background: var(--ln); color: var(--d); cursor: not-allowed; }
+    .link { background: none; border: 0; padding: 0; color: var(--g); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+    .link:hover { color: var(--g2); }
 
-  <form class="panel" method="post" action="{{ url_for('fix') }}" enctype="multipart/form-data" id="fix-form">
-    <label class="drop" id="drop">
-      <strong>Drop a recording here</strong>
-      <span>or click to choose an MP4 / MOV · H.264 · up to {{ max_upload_mb }} MB</span>
-      <input type="file" name="video" id="video" accept=".mp4,.mov,.m4v,video/mp4,video/quicktime" required>
-    </label>
-    <div class="filename" id="filename"></div>
-    <div class="actions">
-      <button type="submit" id="submit" disabled>Recover clean tail</button>
-      <span class="hint">The original file is never modified. Outputs get unique names.</span>
-    </div>
-  </form>
+    /* drop zone */
+    .zone { position: relative; background: var(--p); border-radius: 2px; padding: 52px 40px 32px; min-height: 280px; transition: background .2s; }
+    .zone::before {
+      content: ""; position: absolute; inset: 12px; pointer-events: none; --c: var(--d);
+      background:
+        linear-gradient(var(--c),var(--c)) 0 0/24px 2px, linear-gradient(var(--c),var(--c)) 0 0/2px 24px,
+        linear-gradient(var(--c),var(--c)) 100% 0/24px 2px, linear-gradient(var(--c),var(--c)) 100% 0/2px 24px,
+        linear-gradient(var(--c),var(--c)) 0 100%/24px 2px, linear-gradient(var(--c),var(--c)) 0 100%/2px 24px,
+        linear-gradient(var(--c),var(--c)) 100% 100%/24px 2px, linear-gradient(var(--c),var(--c)) 100% 100%/2px 24px;
+      background-repeat: no-repeat; transition: inset .25s;
+    }
+    .zone[data-state=ready]::before, .zone[data-state=working]::before, .zone[data-over]::before { --c: var(--g); inset: 5px; }
+    .zone[data-over] { background: #20260f; }
+    .zone[data-state=idle] { cursor: pointer; }
+    .v { display: none; }
+    .zone[data-state=idle] .v-idle, .zone[data-state=ready] .v-ready, .zone[data-state=working] .v-work { display: block; }
+    .big { font-size: 34px; font-weight: 600; line-height: 1.15; margin-bottom: 8px; overflow-wrap: anywhere; }
+    .sub { color: var(--m); }
+    .sub b { color: var(--g); font-weight: 600; }
+    .ready-actions { display: flex; align-items: center; gap: 24px; margin-top: 26px; flex-wrap: wrap; }
 
-  <div class="grid3">
-    <div class="mini"><b>Clean tail MP4</b><p>Stream-copied from the first intact IDR. Same codec, same quality, no generation loss.</p></div>
-    <div class="mini"><b>Early audio</b><p>The audio that survives before the cut, exported separately so it is not lost.</p></div>
-    <div class="mini"><b>Evidence report</b><p>Boundary timestamps, sample counts, packet hash match and decode verification in JSON.</p></div>
+    .strip { display: flex; align-items: flex-end; gap: 3px; height: 44px; margin-top: 36px; }
+    .strip i { flex: 1; background: var(--ln); border-radius: 1px; transition: background .15s; }
+    .strip i.bad { background: var(--bad); }
+    .strip i.ok { background: var(--g); }
+    .strip i.hd { background: var(--t); }
+    .zone[data-over] .strip i { background: var(--gd); }
+
+    /* working */
+    .steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
+    .steps li { display: flex; align-items: center; gap: 12px; color: var(--d); font-size: 17px; }
+    .steps li::before { content: ""; width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 50%; }
+    .steps li.done { color: var(--m); }
+    .steps li.done::before { background: var(--g); border-color: var(--g); }
+    .steps li.on { color: var(--t); font-weight: 600; }
+    .steps li.on::before { background: var(--g); border-color: var(--g); animation: pulse 1.1s ease-out infinite; }
+    .steps li[data-p].on::after { content: attr(data-p); color: var(--g); margin-left: auto; }
+    @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(118,185,0,.7); } to { box-shadow: 0 0 0 10px rgba(118,185,0,0); } }
+
+    /* below zone */
+    .alt { margin-top: 28px; }
+    .alt label { display: block; font-weight: 600; margin-bottom: 8px; }
+    .path {
+      width: 100%; background: var(--k); color: var(--t); border: 1px solid var(--ln); border-radius: 2px;
+      font: inherit; padding: 13px 14px; transition: border-color .15s;
+    }
+    .path::placeholder { color: var(--d); }
+    .path:focus { outline: none; border-color: var(--g); }
+    .help { color: var(--d); font-size: 14px; margin-top: 8px; }
+    .check { display: flex; align-items: center; gap: 10px; margin-top: 24px; color: var(--m); cursor: pointer; }
+    .check input { width: 18px; height: 18px; accent-color: var(--g); margin: 0; }
+    .check span { color: var(--d); }
+    .notice { margin-bottom: 24px; padding: 14px 16px; border-left: 3px solid var(--bad); background: #2a1212; }
+    .notice.good { border-color: var(--g); background: #172008; }
+    .notice.warn { border-color: var(--warn); background: #2a2308; }
+
+    /* result */
+    .chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 20px; color: var(--g); }
+    .chip.warn { color: var(--warn); }
+    .chip::before { content: ""; width: 10px; height: 10px; background: currentColor; border-radius: 50%; }
+    .res h1 { margin-bottom: 14px; }
+    .res .lede { color: var(--m); font-size: 18px; margin-bottom: 40px; overflow-wrap: anywhere; }
+    .res .strip { height: 64px; margin: 0 0 10px; }
+    .legend { display: flex; justify-content: space-between; gap: 16px; color: var(--m); font-size: 15px; }
+    .legend b { color: var(--t); font-weight: 600; }
+    .stats { display: flex; gap: 56px; margin: 40px 0; flex-wrap: wrap; }
+    .stat .v2 { font-size: 40px; font-weight: 500; line-height: 1.1; }
+    .stat .k { color: var(--m); font-size: 15px; }
+    .files { display: grid; gap: 2px; margin-bottom: 8px; }
+    .file { background: var(--p); padding: 18px 20px; }
+    .fh { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+    .fh span { color: var(--m); font-weight: 400; }
+    .fn { color: var(--g); margin: 2px 0 12px; overflow-wrap: anywhere; }
+    .row { display: flex; gap: 8px; }
+    .row .path { flex: 1; min-width: 0; }
+    .copy { background: none; border: 1px solid var(--d); color: var(--t); border-radius: 2px; padding: 0 20px; font-weight: 600; min-width: 88px; transition: border-color .15s, color .15s; }
+    .copy:hover { border-color: var(--g); color: var(--g); }
+    .fd { color: var(--d); font-size: 14px; margin-top: 8px; }
+    code { color: var(--m); font-size: .92em; }
+    details { margin-top: 32px; color: var(--m); }
+    summary { cursor: pointer; font-weight: 600; color: var(--t); }
+    details ul { margin: 12px 0 0; padding-left: 20px; }
+    details li { margin: 6px 0; }
+    .caveat { margin: 32px 0; color: var(--m); max-width: 60ch; }
+
+    @media (max-width: 640px) {
+      header { margin-bottom: 44px; }
+      .zone { padding: 40px 24px 24px; }
+      .big { font-size: 28px; }
+      .stats { gap: 32px; }
+      .row { flex-direction: column; }
+      .copy { padding: 11px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><div class="mark"></div>nvidia-fix</div>
+      <span>v{{ version }}</span>
+    </header>
+
+    {% if result %}
+      {% set corruption = result.corruption %}
+      {% set video = result.recovery.video %}
+      {% set total = (corruption.clean_start_seconds + video.duration_seconds) or 1 %}
+      <main class="res">
+        {% if result.status == 'success' %}
+          <div class="chip">Verified clean</div>
+        {% else %}
+          <div class="chip warn">Recovered with warnings</div>
+        {% endif %}
+
+        <h1>Clean video recovered.</h1>
+        <p class="lede">{{ result.original_name }}</p>
+
+        {% if result.warning %}
+          <div class="notice {% if result.status == 'success' %}good{% else %}warn{% endif %}">{{ result.warning }}</div>
+        {% endif %}
+
+        <div class="strip" data-lost="{{ (corruption.clean_start_seconds / total * 100)|round(1) }}" role="img"
+             aria-label="Lost {{ corruption.clean_start_seconds|timecode }}, recovered {{ video.duration_seconds|timecode }}"></div>
+        <div class="legend">
+          <span>Lost <b>{{ corruption.clean_start_seconds|timecode }}</b></span>
+          <span>Recovered <b>{{ video.duration_seconds|timecode }}</b></span>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="v2">{{ "{:,}".format(corruption.bad_samples) }}</div><div class="k">Damaged samples</div></div>
+          <div class="stat"><div class="v2">{{ video.decode_errors }}</div><div class="k">Decode errors</div></div>
+        </div>
+
+        <h2>Saved files</h2>
+        <div class="files">
+          {% for entry in result.outputs %}
+            <div class="file">
+              <div class="fh">{{ entry.label }}{% if entry.size_bytes %}<span>{{ entry.size_bytes|filesize }}</span>{% endif %}</div>
+              <p class="fn">{{ entry.name }}</p>
+              <div class="row">
+                <input class="path" type="text" value="{{ entry.path }}" readonly onclick="this.select()" aria-label="{{ entry.label }} path">
+                <button type="button" class="copy">Copy</button>
+              </div>
+              <p class="fd">{{ entry.detail }}</p>
+            </div>
+          {% endfor %}
+        </div>
+        <p class="help">{{ result.saved_note }} <code>{{ result.output_dir }}</code></p>
+
+        <p class="caveat">The first {{ corruption.last_bad_seconds|timecode }} was overwritten in the recorder's file and can't be rebuilt. Only its surviving audio is kept.</p>
+
+        <a class="btn" href="{{ url_for('index') }}">Recover another</a>
+
+        <details>
+          <summary>How it was verified</summary>
+          <ul>
+            <li>Every video sample after the boundary passed the H.264 header check.</li>
+            <li>The first output packet matches the source byte for byte (SHA-256 <code>{{ (video.first_packet_sha256 or '')[:16] }}…</code>).</li>
+            <li>{% if video.decode_errors == 0 %}A full decode reported zero errors.{% else %}A full decode reported {{ video.decode_errors }} error line(s).{% endif %}</li>
+            <li>{{ "{:,}".format(video.packets) }} video packets were stream-copied, not re-encoded.</li>
+          </ul>
+        </details>
+      </main>
+
+    {% else %}
+      <main>
+        <h1>Recover the clean tail.</h1>
+
+        <div class="notice" id="note" {% if not error %}hidden{% endif %}>{{ error }}</div>
+        {% if healthy %}<div class="notice good">{{ healthy }}</div>{% endif %}
+
+        <form id="fix-form" method="post" action="{{ url_for('fix') }}">
+          <div class="zone" id="zone" data-state="idle">
+            <div class="v v-idle">
+              <p class="big">Drop a recording</p>
+              <p class="sub">or <button type="button" class="link" id="browse">browse files</button></p>
+            </div>
+
+            <div class="v v-ready">
+              <p class="big" id="name"></p>
+              <p class="sub"><span id="size"></span> &nbsp;Saves as <b id="out"></b></p>
+              <div class="ready-actions">
+                <button type="submit" class="btn" id="go" disabled>Recover video</button>
+                <button type="button" class="link" id="clear">Clear</button>
+              </div>
+            </div>
+
+            <div class="v v-work">
+              <p class="big">Recovering</p>
+              <ol class="steps" id="steps"></ol>
+            </div>
+
+            <div class="strip" id="strip" aria-hidden="true"></div>
+            <input type="file" id="file" accept=".mp4,.mov,.m4v,video/*" hidden>
+          </div>
+
+          <div class="alt">
+            <label for="video_path">Or paste the full path</label>
+            <input class="path" type="text" id="video_path" name="video_path" value="{{ video_path }}"
+                   placeholder="{{ suggested_path or 'D:\\Videos\\ShadowPlay\\recording.mp4' }}"
+                   autocomplete="off" spellcheck="false">
+            <p class="help">{{ supported }}. “Copy as path” works.
+              {% if suggested_path %}<button type="button" class="link" id="use-sample">Use sample</button>{% endif %}</p>
+          </div>
+
+          <label class="check">
+            <input type="checkbox" name="full_decode" value="1" checked>
+            Verify the full video after cutting <span>Slower, recommended</span>
+          </label>
+          <p class="help">Your original is never modified.</p>
+        </form>
+      </main>
+    {% endif %}
   </div>
 
-  <div class="section-title">How it works</div>
-  <div class="steps">
-    <div class="step"><div class="n">01</div><h3>Scan every sample</h3><p>Each H.264 packet is checked for a valid length-prefixed NAL header, without decoding the video.</p></div>
-    <div class="step"><div class="n">02</div><h3>Find the boundary</h3><p>The last damaged sample is located, then the first clean keyframe after it with a stable run of valid samples.</p></div>
-    <div class="step"><div class="n">03</div><h3>Cut and verify</h3><p>The tail is stream-copied. The first output packet must match the source byte-for-byte, then the result is decoded.</p></div>
-  </div>
+  <script>
+    (function () {
+      var $ = function (s) { return document.querySelector(s); };
 
-  <p class="caveat">
-    <strong>Honest limitation:</strong> video before the boundary was overwritten in place.
-    It cannot be reconstructed from this file. The app recovers the intact tail and all
-    surviving audio — not the lost frames.
-  </p>
-{% endblock %}
-{% block scripts %}
-<script>
-  const input = document.getElementById('video');
-  const drop = document.getElementById('drop');
-  const name = document.getElementById('filename');
-  const submit = document.getElementById('submit');
-  const form = document.getElementById('fix-form');
+      // Tick strip: one motif for drop zone, progress and result.
+      function strip(el, lost) {
+        var n = 72, cut = lost > 0 ? Math.max(1, Math.round(n * lost / 100)) : 0;
+        el.innerHTML = '';
+        for (var i = 0; i < n; i++) {
+          var t = document.createElement('i');
+          t.style.height = (30 + 70 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * .55))) + '%';
+          if (lost != null) t.className = i < cut ? 'bad' : 'ok';
+          el.appendChild(t);
+        }
+        return el.children;
+      }
+      document.querySelectorAll('.strip[data-lost]').forEach(function (el) { strip(el, +el.dataset.lost); });
 
-  function chose() {
-    if (input.files.length) {
-      name.textContent = input.files[0].name + ' · ' + (input.files[0].size / 1048576).toFixed(1) + ' MB';
-      submit.disabled = false;
-    } else {
-      name.textContent = '';
-      submit.disabled = true;
-    }
-  }
-  input.addEventListener('change', chose);
+      // Result page: copy buttons.
+      document.querySelectorAll('.copy').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var input = b.parentElement.querySelector('.path');
+          input.select();
+          var ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) {}
+          if (!ok && navigator.clipboard) navigator.clipboard.writeText(input.value).catch(function () {});
+          b.textContent = 'Copied';
+          setTimeout(function () { b.textContent = 'Copy'; }, 1400);
+        });
+      });
 
-  ['dragenter', 'dragover'].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('dragging'); });
-  });
-  ['dragleave', 'drop'].forEach(function (ev) {
-    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('dragging'); });
-  });
-  drop.addEventListener('drop', function (e) {
-    if (e.dataTransfer.files.length) {
-      input.files = e.dataTransfer.files;
-      chose();
-    }
-  });
+      // Home page.
+      var form = $('#fix-form');
+      if (!form) return;
+      var zone = $('#zone'), picker = $('#file'), path = $('#video_path'), go = $('#go'), note = $('#note');
+      var ticks = strip($('#strip'));
+      var calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var file = null, scan, advance;
 
-  form.addEventListener('submit', function () {
-    if (!input.files.length) return;
-    const overlay = document.createElement('div');
-    overlay.className = 'overlay on';
-    overlay.innerHTML = '<div><div class="spinner"></div><b>Scanning and rebuilding…</b><span>Large recordings can take a minute. Keep this tab open.</span></div>';
-    document.body.appendChild(overlay);
-    submit.disabled = true;
-  });
-</script>
-{% endblock %}
+      function size(n) { return n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB'; }
+      function base(v) { return v.trim().replace(/^["']|["']$/g, '').split(/[\\/]/).pop(); }
+      function error(msg) { note.textContent = msg; note.hidden = !msg; }
+
+      function sync() {
+        var name = file ? file.name : base(path.value);
+        zone.dataset.state = name ? 'ready' : 'idle';
+        $('#name').textContent = name;
+        $('#size').textContent = file ? size(file.size) : 'Local path';
+        $('#out').textContent = name.replace(/\.[^.]+$/, '') + '.clean.mp4';
+        go.disabled = !name;
+      }
+
+      function take(f) {
+        if (!f) return;
+        if (!/\.(mp4|mov|m4v)$/i.test(f.name)) { error('Drop an MP4, MOV or M4V file.'); return; }
+        file = f; path.value = ''; error(''); sync();
+      }
+
+      $('#browse').addEventListener('click', function (e) { e.stopPropagation(); picker.click(); });
+      zone.addEventListener('click', function (e) {
+        if (zone.dataset.state === 'idle' && !e.target.closest('button')) picker.click();
+      });
+      picker.addEventListener('change', function () { take(picker.files[0]); });
+      $('#clear').addEventListener('click', function () { file = null; picker.value = ''; path.value = ''; sync(); });
+      path.addEventListener('input', function () { file = null; error(''); sync(); });
+      var sample = $('#use-sample');
+      if (sample) sample.addEventListener('click', function () { file = null; path.value = {{ (suggested_path or "")|tojson }}; sync(); path.focus(); });
+
+      // Drop anywhere on the page.
+      ['dragenter', 'dragover'].forEach(function (t) {
+        addEventListener(t, function (e) { e.preventDefault(); if (zone.dataset.state !== 'working') zone.dataset.over = ''; });
+      });
+      addEventListener('dragleave', function (e) { if (!e.relatedTarget) delete zone.dataset.over; });
+      addEventListener('drop', function (e) {
+        e.preventDefault(); delete zone.dataset.over;
+        if (zone.dataset.state !== 'working') take(e.dataTransfer.files[0]);
+      });
+
+      function stop() {
+        clearInterval(scan); clearInterval(advance);
+        Array.prototype.forEach.call(ticks, function (t) { t.className = ''; });
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (go.disabled) return;
+        var full = form.full_decode.checked, fd = new FormData();
+        if (full) fd.append('full_decode', '1');
+        if (file) fd.append('video_file', file); else fd.append('video_path', path.value.trim());
+
+        var steps = (file ? ['Uploading'] : []).concat(['Scanning samples', 'Finding the boundary', 'Cutting the tail'], full ? ['Verifying'] : []);
+        var list = $('#steps'), k = 0;
+        list.innerHTML = steps.map(function (s) { return '<li>' + s + '</li>'; }).join('');
+        function mark() { Array.prototype.forEach.call(list.children, function (li, i) { li.className = i < k ? 'done' : i === k ? 'on' : ''; }); }
+        function begin() { k = file ? 1 : 0; mark(); advance = setInterval(function () { if (k < steps.length - 1) { k++; mark(); } }, 4000); }
+        zone.dataset.state = 'working'; error(''); mark();
+
+        var cut = Math.round(ticks.length * .38), h = 0;
+        if (calm) {
+          Array.prototype.forEach.call(ticks, function (t, i) { t.className = i < cut ? 'bad' : 'ok'; });
+        } else {
+          scan = setInterval(function () {
+            Array.prototype.forEach.call(ticks, function (t, i) { t.className = i === h ? 'hd' : i < h ? (i < cut ? 'bad' : 'ok') : ''; });
+            h = (h + 1) % (ticks.length + 10);
+          }, 50);
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', form.action);
+        if (file) {
+          xhr.upload.onprogress = function (ev) {
+            if (ev.lengthComputable) list.children[0].dataset.p = Math.round(ev.loaded / ev.total * 100) + '%';
+          };
+          xhr.upload.onload = begin;
+        } else { begin(); }
+        xhr.onload = function () { stop(); document.open(); document.write(xhr.responseText); document.close(); };
+        xhr.onerror = function () { stop(); sync(); error('Can’t reach the app. Check that it’s still running.'); };
+        xhr.send(fd);
+      });
+
+      sync();
+    })();
+  </script>
+</body>
+</html>

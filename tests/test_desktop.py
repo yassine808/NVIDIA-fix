@@ -56,7 +56,7 @@ class DesktopTests(unittest.TestCase):
             self.assertIn("Recovered and verified", app.status_var.get())
             self.assertTrue(Path(app.result["paths"]["video"]).is_file())
             self.assertTrue(Path(app.result["paths"]["audio"]).is_file())
-            self.assertEqual(app.saved_path.get(), str(output))
+            self.assertEqual(Path(app.saved_path.get()), output.resolve())
         finally:
             root.destroy()
 

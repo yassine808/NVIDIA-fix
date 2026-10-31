@@ -40,8 +40,24 @@ from typing import Callable, Dict, List, Optional, Sequence
 TOOL = "nvidia-fix"
 VERSION = "1.2.0"
 
-FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
-FFPROBE = os.environ.get("FFPROBE_BINARY", "ffprobe")
+def _resolve_tool(name: str, env_var: str) -> str:
+    """Find ffmpeg/ffprobe: explicit env, PATH, then the bundled portable build."""
+    explicit = os.environ.get(env_var)
+    if explicit:
+        return explicit
+    found = shutil.which(name)
+    if found:
+        return found
+    bundled = sorted(Path(__file__).resolve().parent.glob(
+        f"recovery/tools/ff/*/bin/{name}.exe"
+    ))
+    if bundled:
+        return str(bundled[0])
+    return name
+
+
+FFMPEG = _resolve_tool("ffmpeg", "FFMPEG_BINARY")
+FFPROBE = _resolve_tool("ffprobe", "FFPROBE_BINARY")
 
 SEEK_OFFSET = 0.005          # land just after the chosen IDR when seeking
 CANDIDATE_RUN = 120          # samples that must be valid after a candidate

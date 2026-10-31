@@ -870,12 +870,12 @@ class DesktopApp:
 
         thread = threading.Thread(
             target=self._worker,
-            args=(source, output_dir),
+            args=(source, output_dir, bool(self.full_length_var.get())),
             daemon=True,
         )
         thread.start()
 
-    def _worker(self, source: Path, output_dir: Path) -> None:
+    def _worker(self, source: Path, output_dir: Path, full_length: bool) -> None:
         def progress(message: str) -> None:
             self.events.put(("status", message))
 
@@ -885,7 +885,7 @@ class DesktopApp:
                 out_dir=output_dir,
                 full_decode=True,
                 progress=progress,
-                full_length=self.full_length_var.get(),
+                full_length=full_length,
             )
         except Exception as exc:  # surface any failure to the UI
             self.events.put(("error", str(exc) or exc.__class__.__name__))

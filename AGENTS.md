@@ -164,6 +164,23 @@ not file damage), no unclassified output, no retry attempts needed.
 
 ## Mission log
 
+### 2026-10-31 — session 5: path-based web UI shipped and tested on the real file
+
+- `app.py` no longer accepts uploads. It takes one field, `video_path` (or
+  `{"path": ...}` on `/api/fix`), resolves it, and runs
+  `process(out_dir=None)` so the engine writes `<name>.clean.mp4` beside the
+  input. No job/download plumbing; the result page lists the absolute paths.
+- `templates/index.html` is the whole front end in one file: layout, CSS, the
+  path form (`<name>.clean.mp4` preview) and the result view, switched by a
+  Jinja `{% if result %}`. `nvidia_fix._resolve_tool` finds the bundled
+  `recovery/tools/ff/*/bin` tools, so neither the app nor the tests need ffmpeg
+  on PATH.
+- Verified: `tests/test_app.py` 11/11, `tests/test_parsers.py` 9/9, live server
+  `/healthz` + `/` 200, and a real `/api/fix` run on
+  `recovery/Arc_Raiders corrupted.mp4`: success, 114.031811 s cut, 185.981 s /
+  22,318 packets, 0 decode errors, outputs beside the input.
+
+
 ### 2026-10-31 — session 4: full-length rebuild + donor hunt closes the 100% question
 
 - **Full decode of the source's audio proves the audio is 100% intact** for

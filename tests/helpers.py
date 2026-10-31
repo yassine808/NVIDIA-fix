@@ -1,10 +1,11 @@
 import json
-import os
 import subprocess
 from pathlib import Path
 
-FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
-FFPROBE = os.environ.get("FFPROBE_BINARY", "ffprobe")
+import nvidia_fix
+
+FFMPEG = nvidia_fix.FFMPEG
+FFPROBE = nvidia_fix.FFPROBE
 
 
 def run(cmd):

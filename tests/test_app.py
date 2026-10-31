@@ -1,5 +1,4 @@
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -14,7 +13,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 TEMP_ROOT = Path(tempfile.mkdtemp(prefix="nvidia-fix-tests-"))
-os.environ.setdefault("NVIDIA_FIX_RESULTS", str(TEMP_ROOT / "results"))
 
 import app as webapp  # noqa: E402
 import nvidia_fix  # noqa: E402
@@ -118,45 +116,61 @@ class WebTests(unittest.TestCase):
         cls.clip = make_clip(TEMP_ROOT / "web-input.mp4", seconds=8, with_audio=True)
         corrupt_middle(cls.clip)
 
-    def _upload(self):
-        with open(self.clip, "rb") as handle:
-            return self.client.post(
-                "/api/fix",
-                data={"video": (handle, "web-input.mp4")},
-                content_type="multipart/form-data",
-            )
+    def _fix(self, payload):
+        return self.client.post("/api/fix", json=payload)
 
-    def test_api_recovers_and_downloads(self):
-        response = self._upload()
+    def tearDown(self):
+        for path in TEMP_ROOT.glob("web-input.clean*"):
+            path.unlink()
+
+    def test_api_recovers_beside_the_original(self):
+        response = self._fix({"path": str(self.clip), "full_decode": True})
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         data = response.get_json()
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["original_name"], "web-input.mp4")
-        self.assertTrue(data["downloads"])
+        self.assertEqual(data["original_path"], str(self.clip.resolve()))
 
-        job = data["job_id"]
-        page = self.client.get(f"/result/{job}")
-        self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Clean tail", page.data)
+        video = Path(data["paths"]["video"])
+        self.assertEqual(video.parent, self.clip.resolve().parent)
+        self.assertEqual(video.name, "web-input.clean.mp4")
+        self.assertTrue(video.is_file())
+        self.assertTrue(Path(data["paths"]["audio"]).is_file())
+        self.assertTrue(Path(data["paths"]["report"]).is_file())
+        self.assertEqual(len(data["outputs"]), 3)
 
-        for entry in data["downloads"]:
-            download = self.client.get(f"/download/{job}/{entry['name']}")
-            self.assertEqual(download.status_code, 200, entry["name"])
-            self.assertGreater(len(download.data), 0, entry["name"])
-            download.close()
+    def test_result_page_lists_the_outputs(self):
+        response = self.client.post(
+            "/fix",
+            data={"video_path": f'"{self.clip}"', "full_decode": "1"},
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        page = response.get_data(as_text=True)
+        self.assertIn("Clean video", page)
+        self.assertIn("web-input.clean.mp4", page)
+        self.assertIn(str(self.clip.resolve().parent), page)
 
     def test_rejects_wrong_extension(self):
-        response = self.client.post(
-            "/api/fix",
-            data={"video": (io.BytesIO(b"not a video"), "notes.txt")},
-            content_type="multipart/form-data",
-        )
+        notes = TEMP_ROOT / "notes.txt"
+        notes.write_text("not a video", encoding="utf-8")
+        response = self._fix({"path": str(notes)})
         self.assertEqual(response.status_code, 400)
         self.assertIn("Unsupported file type", response.get_json()["error"])
 
-    def test_rejects_missing_file(self):
-        response = self.client.post("/api/fix", data={}, content_type="multipart/form-data")
+    def test_rejects_missing_path(self):
+        response = self._fix({})
         self.assertEqual(response.status_code, 400)
+        self.assertIn("path", response.get_json()["error"].lower())
+
+    def test_rejects_nonexistent_file(self):
+        response = self._fix({"path": str(TEMP_ROOT / "nope.mp4")})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("No file exists", response.get_json()["error"])
+
+    def test_health_endpoint(self):
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "ok")
 
 
 if __name__ == "__main__":

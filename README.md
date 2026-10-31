@@ -126,8 +126,9 @@ python desktop.py
 
 Or double-click `NVIDIA-Fix.pyw` to launch without a console window.
 
-The desktop app needs Python 3.9+ and ffmpeg/ffprobe on `PATH`. Flask is only
-needed for the optional web UI.
+The desktop app needs Python 3.9+. ffmpeg/ffprobe are found on `PATH` when
+installed, otherwise the portable build in `recovery/tools/ff/` is used. Flask
+is only needed for the optional web UI.
 
 ## CLI
 
@@ -256,8 +257,9 @@ python -m unittest discover -s tests -v
 ```
 
 The suite generates its own clean and deliberately corrupted clips with ffmpeg
-and exercises the detector, cutter, audio export, Flask upload flow, CLI, and the
-desktop UI (hidden window). The desktop test is skipped if Tk is unavailable.
+and exercises the detector, cutter, audio export, Flask path-based web flow, CLI,
+and the desktop UI (hidden window). The desktop test is skipped if Tk is
+unavailable.
 
 To run the real-recording integration test:
 
@@ -284,6 +286,10 @@ from [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 ## Optional web UI
 
+A friendly local front end for people who would rather paste a path than use the
+CLI. It never uploads anything and asks for exactly one thing: the path to the
+recording.
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -291,14 +297,22 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open <http://127.0.0.1:5000>, drop the recording, and wait. Processing is local
-and synchronous; a large recording can take a minute because the result is
-decoded to verify it. Uploads are limited to 8 GB by default:
+Open <http://127.0.0.1:5000> (the browser opens automatically), paste the full
+path to the MP4/MOV/M4V — quotes from Explorer's *Copy as path* are accepted —
+and press **Recover video**. Processing is local and synchronous; a large
+recording can take a minute because the result is decoded to verify it.
 
-```powershell
-$env:NVIDIA_FIX_MAX_UPLOAD_MB = "20000"
-python app.py
-```
+Outputs are written **beside the original file**, never uploaded:
+
+| File | Contents |
+| --- | --- |
+| `<name>.clean.mp4` | The recovered clean tail (stream copy) |
+| `<name>.clean.audio.m4a` | Surviving audio from before the cut |
+| `<name>.clean.report.json` | Boundary, hashes and decode verification |
+
+If an output already exists, a numbered name (`<name>.clean-2.mp4`) is used, so
+nothing is overwritten. Environment knobs: `NVIDIA_FIX_PORT`,
+`NVIDIA_FIX_HOST`, and `NVIDIA_FIX_NO_BROWSER=1` (don't auto-open the browser).
 
 ## FAQ
 

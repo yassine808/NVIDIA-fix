@@ -12,6 +12,8 @@
       `.DVR.fixed.mp4` is green/blank for its first ~114 s and does not match
       this recording at any timestamp (PSNR 12–19 dB against every candidate).
 - [x] Full-length deliverable built and verified (see the log entry below).
+- [x] Path-based web UI: paste a video path, outputs saved beside it as
+      `<name>.clean.mp4`; tested end to end on the real recording.
 - [ ] 100% of the *original* opening: impossible from every local source.
 
 ## Environment rules
@@ -20,6 +22,33 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — path-based web UI, tested on the real recording
+
+- Goal: make the Flask app usable as a local tool: one input (the video path),
+  output written beside it as `<name>.clean.mp4`, and an HTML front end that is
+  easy to modify later.
+- Done: `app.py` is now path-based (`video_path` form field / `{"path": ...}` on
+  `/api/fix`) and calls `nvidia_fix.process(source, out_dir=None)` so outputs
+  land next to the input. The whole front end is one file,
+  `templates/index.html` (layout, CSS, path form, live output-name preview,
+  result view switched by `{% if result %}`). Removed the upload/job/download
+  flow.
+  `nvidia_fix._resolve_tool` now falls back to the bundled
+  `recovery/tools/ff/*/bin` ffmpeg/ffprobe, so no PATH setup is needed. Tests
+  (`tests/test_app.py`, `tests/helpers.py`) updated for the path flow. Also
+  fixed `desktop.py` reading `full_length_var` from the worker thread (Tk threw
+  "main thread is not in main loop"); the value is now captured before the
+  thread starts.
+- Verified: Flask 3.1.3 installed here. `python tests/test_app.py` 11/11,
+  `python tests/test_parsers.py` 9/9. Server smoke test on port 5123: `/healthz`
+  ok, `/` 200. Real run through `/api/fix` on `recovery/Arc_Raiders corrupted.mp4`:
+  `status: success`, clean start 114.031811 s, 185.981 s / 22,318 packets,
+  **0 decode errors** in 24.8 s; wrote
+  `recovery/Arc_Raiders corrupted.clean.mp4` (266,260,199 B),
+  `.clean.audio.m4a` and `.clean.report.json`.
+- Next: nothing in flight. The 100% goal is still closed to a donor source.
+
 
 ### 2026-10-31 — full-length build + donor hunt result
 
