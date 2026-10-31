@@ -42,6 +42,39 @@ class SyncSampleTests(unittest.TestCase):
         self.assertNotIn(13651, syncs)
 
 
+class ChunkOffsetTests(unittest.TestCase):
+    """co64 vs stco: the box type decides the width, never the FullBox version.
+
+    Reading a co64 box as 32-bit halves produced phantom overlaps and a false
+    "212 MB orphan tail" on 2026-10-30, so the fixture keeps both widths apart.
+    """
+
+    def offset_box(self, values, wide):
+        fmt = ">Q" if wide else ">I"
+        body = struct.pack(">I", 0)                       # version 0 + flags
+        body += struct.pack(">I", len(values))
+        body += b"".join(struct.pack(fmt, v) for v in values)
+        return body, 0, len(body)
+
+    def test_stco_reads_four_byte_offsets(self):
+        buf, start, end = self.offset_box([40, 96, 439194252], wide=False)
+        self.assertEqual(
+            mp4_probe.parse_stco(buf, start, end, wide=False), [40, 96, 439194252]
+        )
+
+    def test_co64_reads_eight_byte_offsets(self):
+        values = [40, 96, 439194252, (1 << 32) + 7]        # beyond 4 GiB on purpose
+        buf, start, end = self.offset_box(values, wide=True)
+        self.assertEqual(mp4_probe.parse_stco(buf, start, end, wide=True), values)
+
+    def test_co64_is_not_read_as_32_bit_halves(self):
+        buf, start, end = self.offset_box([439194252], wide=True)
+        self.assertEqual(mp4_probe.parse_stco(buf, start, end, wide=True), [439194252])
+        # The old bug's exact signature: the 64-bit offset arrives as its high
+        # 32-bit word, i.e. 0 — every chunk looked like it started at byte 0.
+        self.assertEqual(mp4_probe.parse_stco(buf, start, end, wide=False), [0])
+
+
 class DecodeClassificationTests(unittest.TestCase):
     MUXER = ("[null @ 00000253] Application provided invalid, non monotonically "
              "increasing dts to muxer in stream 0: 18161 >= 18161")
