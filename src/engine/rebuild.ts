@@ -63,7 +63,7 @@ export function planToDict(plan: FullLengthPlan): Json {
 
 // A single backslash, written without an escaped literal so no regex or
 // double-escaped string is needed (String.raw cannot close on one).
-const BACKSLASH = String.fromCharCode(92);
+const BACKSLASH = String.fromCodePoint(92);
 
 /** A concat-demuxer line that survives spaces, quotes and Windows paths. */
 export function concatEntry(target: string): string {

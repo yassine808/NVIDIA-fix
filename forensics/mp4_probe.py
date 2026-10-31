@@ -377,7 +377,7 @@ def main() -> int:
     out_target = os.path.realpath(out_json) if out_json else None
     file_size = os.path.getsize(resolved)
 
-    with open(resolved, "rb") as fh:  # NOSONAR: readable_file() validated it
+    with open(resolved, "rb") as fh:  # NOSONAR
         # moov can be at the end; read it explicitly by walking sizes from the file.
         top, moov_range = walk_top_level(fh, file_size)
         moov = read_moov(fh, moov_range) if moov_range else None
