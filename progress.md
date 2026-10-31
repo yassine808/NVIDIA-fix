@@ -39,6 +39,28 @@
 
 ## Log
 
+### 2026-10-31 — SonarCloud cleanup resumed: verification + one real bug
+
+- Goal: finish the 103-issue cleanup that was already committed as `e9945aa`
+  (repo description, plain CI job names, Python/TypeScript/renderer/smoke
+  fixes), and prove the refactors did not break the toolchain.
+- Done: repo description checked with `gh repo edit --json` — no
+  "Desktop app built with Electron." left. CI jobs already named "Quality and
+  docs", "Engine tests", "Desktop app", "CLI recovery". Fixed a real defect the
+  refactor introduced in `forensics/mp4_probe.py`: `write_report()` was called
+  twice per run (one copy after `print_summary`), so every `--json` report was
+  written twice.
+- Verified: `npm run build` clean; `npm test` 16/16; `python -m compileall -q
+  tests scripts forensics` OK; `python scripts/ci_e2e.py` passes (clean start
+  4.000 s, 120 packets, 0 decode errors, input hash unchanged); `npm run smoke`
+  on `recovery/tmp-fixture.mp4` reaches the result page through the split
+  renderer (`index.html` + `renderer.js` + `styles.css`, CSP without
+  `unsafe-inline`); `forensics/mp4_probe.py` on the real recording prints
+  35,998 samples / 300.013 s / 298 audio gaps / 7,199,780 B of audio exactly as
+  documented, and `boundary_find.py` still finds 13,650 last-damaged / 13,680
+  first clean keyframe (62.1% clean).
+- Next: push `e9945aa` plus this fix; nothing else in flight on the cleanup.
+
 ### 2026-10-31 — SonarCloud cleanup (103 issues) + plain CI job names
 
 - Goal: clear every issue SonarCloud reports for `yassine808/NVIDIA-fix` (49 in

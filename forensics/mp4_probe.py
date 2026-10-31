@@ -386,8 +386,6 @@ def main() -> int:
         if out_target:
             write_report(report, out_target, out_json)
         print_summary(report)
-        if out_target:
-            write_report(report, out_target, out_json)
     return 0
 
 
