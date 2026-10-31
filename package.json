@@ -1,14 +1,16 @@
 {
-  "name": "nvidia-fix-desktop",
+  "name": "nvidia-fix",
   "version": "1.2.0",
   "private": true,
-  "description": "Desktop front end for the NVIDIA-Fix recovery engine",
+  "description": "Recover the clean tail of a corrupted NVIDIA ShadowPlay recording",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron .",
     "smoke": "node scripts/smoke-ui.js",
+    "engine": "node dist/engine/cli.js",
+    "test": "npm run build && node --test tests/engine.test.mjs",
     "dist": "npm run build && node scripts/stage-engine.js && electron-builder --win portable"
   },
   "devDependencies": {
@@ -33,6 +35,10 @@
       {
         "from": ".stage",
         "to": "."
+      },
+      {
+        "from": "dist/engine",
+        "to": "engine/dist/engine"
       }
     ],
     "win": {

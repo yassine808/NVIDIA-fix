@@ -15,18 +15,16 @@ import type {
 const SUPPORTED_SUFFIXES = new Set([".mp4", ".mov", ".m4v"]);
 const MAX_STDERR = 8 * 1024;
 
-const PYTHON = process.env.NVIDIA_FIX_PYTHON || "python";
-
-// Packaged: resources/engine/ holds nvidia_fix.py, bridge.py and the portable
-// ffmpeg build, so the app never depends on the checkout being next to it.
-// Development: the engine lives at the repository root.
+// Packaged: resources/engine/ holds the compiled engine and the portable ffmpeg
+// build, so the app never depends on the checkout being next to it.
+// Development: everything lives at the repository root.
 const PACKAGED = app.isPackaged;
 const ENGINE_ROOT = PACKAGED
   ? path.join(process.resourcesPath, "engine")
   : app.getAppPath();
-const BRIDGE =
-  process.env.NVIDIA_FIX_BRIDGE ||
-  path.join(PACKAGED ? ENGINE_ROOT : app.getAppPath(), "scripts", "bridge.py");
+const BRIDGE = PACKAGED
+  ? path.join(ENGINE_ROOT, "dist", "engine", "bridge.js")
+  : path.join(app.getAppPath(), "dist", "engine", "bridge.js");
 const APP_ICON = PACKAGED
   ? path.join(process.resourcesPath, "icon.png")
   : path.join(app.getAppPath(), "build", "icon.png");
@@ -67,13 +65,7 @@ function resolveVideo(raw: string): string {
 }
 
 function engineVersion(): string {
-  try {
-    const source = fs.readFileSync(path.join(ENGINE_ROOT, "nvidia_fix.py"), "utf-8");
-    const match = source.match(/^VERSION\s*=\s*"([^"]+)"/m);
-    return match ? match[1] : "unknown";
-  } catch {
-    return "unknown";
-  }
+  return app.getVersion();
 }
 
 function buildOutputs(result: RecoveryResult): OutputEntry[] {
@@ -126,8 +118,8 @@ function buildOutputs(result: RecoveryResult): OutputEntry[] {
   return entries;
 }
 
-function pickPython(): string {
-  return PYTHON;
+function runtimePath(): string {
+  return process.execPath;
 }
 
 function killTree(child: ChildProcessWithoutNullStreams): void {
@@ -162,10 +154,14 @@ function runRecovery(request: RecoveryRequest): Promise<RecoveryResult> {
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(pickPython(), args, {
+      child = spawn(runtimePath(), args, {
         cwd: ENGINE_ROOT,
         windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+          NVIDIA_FIX_ENGINE_ROOT: ENGINE_ROOT,
+        },
       });
     } catch (error) {
       reject(error);
@@ -198,9 +194,7 @@ function runRecovery(request: RecoveryRequest): Promise<RecoveryResult> {
 
     child.on("error", (error: Error) => {
       finish(
-        new Error(
-          `Could not start Python (${pickPython()}). Set NVIDIA_FIX_PYTHON to a working interpreter.\n${error.message}`
-        )
+        new Error(`Could not start the recovery engine.\n${error.message}`)
       );
     });
 
@@ -289,7 +283,7 @@ app.whenReady().then(() => {
     return {
       version: app.getVersion(),
       engineVersion: engineVersion(),
-      python: pickPython(),
+      runtime: "TypeScript engine",
       samplePath: fs.existsSync(sample) ? sample : null,
     };
   });

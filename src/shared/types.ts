@@ -65,7 +65,7 @@ export interface RecoveryResult {
 export interface AppInfo {
   version: string;
   engineVersion: string;
-  python: string;
+  runtime: string;
   samplePath: string | null;
 }
 

@@ -1,11 +1,21 @@
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
-import nvidia_fix
+ROOT = Path(__file__).resolve().parents[1]
 
-FFMPEG = nvidia_fix.FFMPEG
-FFPROBE = nvidia_fix.FFPROBE
+
+def _tool(name):
+    found = shutil.which(name)
+    if found:
+        return found
+    bundled = sorted((ROOT / "recovery" / "tools" / "ff").glob(f"*/bin/{name}.exe"))
+    return str(bundled[0]) if bundled else name
+
+
+FFMPEG = _tool("ffmpeg")
+FFPROBE = _tool("ffprobe")
 
 
 def run(cmd):

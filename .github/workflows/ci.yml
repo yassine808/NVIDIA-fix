@@ -17,35 +17,42 @@ jobs:
   quality:
     name: 1 / Quality and docs
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Byte-compile every Python entry point
-        run: python -m compileall -q nvidia_fix.py tests scripts forensics
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Type-check and build
+        run: npm run build
       - name: Check the public CLI version
-        run: python nvidia_fix.py --version
+        run: npm run engine -- --version
+      - name: Byte-compile the Python dev tools
+        run: python -m compileall -q tests scripts forensics
       - name: Check required release files
         run: |
           python -c "from pathlib import Path; readme = Path('README.md').read_text(encoding='utf-8'); assert 'releases/latest' in readme, 'README download link missing'; assert Path('LICENSE').is_file(), 'LICENSE missing'; assert Path('package.json').is_file(), 'package.json missing'; assert Path('build/icon.ico').is_file(), 'app icon missing'; print('release files OK')"
 
   unit:
-    name: 2 / Unit and integration tests
+    name: 2 / Engine tests
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
-      - name: Verify ffmpeg is available
-        run: ffmpeg -version
-      - name: Run the full test suite
-        run: python -m unittest discover -s tests -v
+          node-version: "20"
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Run the engine test suite
+        run: npm test
 
   desktop:
     name: 3 / Desktop app
@@ -59,19 +66,27 @@ jobs:
           cache: npm
       - name: Install Node dependencies
         run: npm ci
-      - name: Type-check and build the Electron app
+      - name: Build the Electron app
         run: npm run build
 
   cli:
     name: 4 / CLI recovery
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install ffmpeg
         run: choco install ffmpeg -y --no-progress
+      - name: Install Node dependencies and build
+        run: |
+          npm ci
+          npm run build
       - name: Recover a synthetic corrupted recording through the CLI
         run: python scripts/ci_e2e.py

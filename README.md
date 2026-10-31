@@ -112,9 +112,10 @@ cancelled. When the rebuild exists, the result page also labels it as a rebuild.
 
 ### Run from source
 
-The desktop app is Electron + TypeScript in this repository root. The recovery
-engine stays Python (`nvidia_fix.py`) and is spawned through
-`scripts/bridge.py`, which streams progress back to the window.
+The whole app is Electron + TypeScript in this repository root. The recovery
+engine is TypeScript too (`src/engine/`): the main process spawns
+`dist/engine/bridge.js` with Electron in Node mode, and it streams progress back
+to the window as JSON lines.
 
 ```powershell
 npm install
@@ -135,23 +136,23 @@ Output names are `‹name›.clean.mp4`, `‹name›.clean.audio.m4a` and
 
 ```powershell
 # inspect without writing anything
-python nvidia_fix.py analyze "D:\Videos\clip.mp4"
+npm run engine -- analyze "D:\Videos\clip.mp4"
 
 # recover
-python nvidia_fix.py fix "D:\Videos\clip.mp4"
+npm run engine -- fix "D:\Videos\clip.mp4"
 
 # choose an output directory / skip the full decode (faster)
-python nvidia_fix.py fix "D:\Videos\clip.mp4" --out "D:\Recovered" --no-full-decode
+npm run engine -- fix "D:\Videos\clip.mp4" --out "D:\Recovered" --no-full-decode
 
 # also rebuild the complete length (copied opening + clean tail + original audio)
-python nvidia_fix.py fix "D:\Videos\clip.mp4" --full-length
+npm run engine -- fix "D:\Videos\clip.mp4" --full-length
 
 # machine-readable output
-python nvidia_fix.py analyze "D:\Videos\clip.mp4" --json
-python nvidia_fix.py fix "D:\Videos\clip.mp4" --json
+npm run engine -- analyze "D:\Videos\clip.mp4" --json
+npm run engine -- fix "D:\Videos\clip.mp4" --json
 
 # how much of the damaged opening is a copy of later footage, and how much is gone
-python nvidia_fix.py explain "D:\Videos\clip.mp4"
+npm run engine -- explain "D:\Videos\clip.mp4"
 ```
 
 Exit codes: `0` success (including an already-healthy file), `2` a handled error
@@ -209,7 +210,7 @@ frames. That section is not recoverable from this file, and the app says so.
 
 ### How much is duplicated, how much is gone
 
-`nvidia_fix.py explain` answers that from the recorded duplication map
+`npm run engine -- explain` answers that from the recorded duplication map
 (`forensics/duplication_dense.py`), clipped at the measured damaged boundary:
 
 ```
@@ -253,22 +254,19 @@ the packaged app expects `ffmpeg` and `ffprobe` on `PATH`.
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -v
+npm test
 ```
 
-The suite generates its own clean and deliberately corrupted clips with ffmpeg
-and exercises the detector, cutter, audio export, the duplication verdict, and
-the CLI.
-
-To run the real-recording integration test:
+The Node test suite pins the duplication arithmetic, the full-length plan and
+the AVCC/decoder classification. The end-to-end check builds a synthetic
+corrupted clip with ffmpeg, runs the real CLI, and verifies the outputs:
 
 ```powershell
-$env:NVIDIA_FIX_REAL_INPUT = "D:\Videos\Arc Raiders\...DVR.mp4"
-python -m unittest tests.test_real_file -v
+python scripts/ci_e2e.py
 ```
 
-That test writes a ~266 MB tail to a temporary directory and deletes it
-afterwards.
+`python scripts/make_fixture.py <out.mp4>` writes a corrupted clip for manual
+runs. Both helpers need Python 3.9+; the app itself does not.
 
 ## CI
 
@@ -277,8 +275,8 @@ from [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 | Check | What it proves |
 | --- | --- |
-| **1 / Quality and docs** | All Python entry points byte-compile; CLI version works; release files exist |
-| **2 / Unit and integration tests** | Detector, cutter, audio export, duplication verdict, and CLI behavior |
+| **1 / Quality and docs** | Python dev tools byte-compile; CLI version works; release files exist |
+| **2 / Unit and integration tests** | Duplication verdict, full-length plan, and the synthetic end-to-end recovery |
 | **3 / Desktop app** | `npm ci`, type-check, and the Electron build compile cleanly |
 | **4 / CLI recovery** | A synthetic corrupted MP4 is analyzed, recovered, and hash-checked end to end |
 
@@ -313,10 +311,9 @@ no clean keyframe exists.
 
 | Path | Purpose |
 | --- | --- |
-| `nvidia_fix.py` | Recovery engine, JSON report, CLI |
+| `src/engine/` | Recovery engine, JSON report, CLI |
 | `src/` | Electron main process, preload bridge, renderer, shared types |
-| `scripts/bridge.py` | JSON-lines bridge that runs the engine for the app |
-| `scripts/` | Build helpers, CI fixture, end-to-end CLI check |
+| `scripts/` | Build helpers, fixture generator, end-to-end CLI check |
 | `build/` | App icon (window, taskbar, favicon) |
 | `tests/` | Unit, integration, and real-file tests |
 | `forensics/` | Standalone MP4 analysis tools used for the evidence chain |

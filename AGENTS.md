@@ -25,7 +25,7 @@ update **Mission log** before you stop working.
 | `recovery/` | Local workspace: input recording + every artifact. Ignored by git. |
 | `recovery/tools/ff/` | Portable ffmpeg/ffprobe 9.0.2 used for decode + stream copy. |
 | `forensics/` | Tracked, no-dependency analysis tools. Run with `PYTHONPATH=forensics`. |
-| `nvidia_fix.py` | Recovery engine + CLI (what the app runs). |
+| `src/engine/` | Recovery engine + CLI (what the app runs). |
 | `src/` | Electron + TypeScript desktop app (main, preload, renderer). |
 | `build/` | App icon (window, taskbar, favicon). |
 | `tests/` | Unit + real-file tests. |
@@ -124,7 +124,7 @@ invent overwritten media.
 
 ### Verified deliverable
 
-`nvidia_fix.py fix` produces
+`npm run engine -- fix` produces
 `recovery/out_v2/Arc_Raiders corrupted.clean.mp4` — **185.981 s, 266,260,199 B,
 22,318 packets**, stream-copied from keyframe 13,680 @ 114.031811 s, plus 114.03 s
 of recovered early audio and a JSON report. Verified 2026-10-31: `status:
@@ -163,6 +163,22 @@ not file damage), no unclassified output, no retry attempts needed.
       to be published as the original opening (see session 4 log).
 
 ## Mission log
+
+### 2026-10-31 — session 7: the engine is TypeScript, the Python app is gone
+
+- `src/engine/` now holds the whole recovery engine: AVCC sample analysis,
+  duplication verdict, cut/first-packet verification, decode classification,
+  early-audio export, full-length rebuild, JSON report and CLI. It reproduces
+  the Python numbers on the synthetic fixture exactly (clean start 4.0 s, 120
+  packets, same first-packet SHA-256, 0 decode errors).
+- The Electron main process spawns `dist/engine/bridge.js` under
+  `ELECTRON_RUN_AS_NODE`; `scripts/bridge.py` and `nvidia_fix.py` are deleted.
+- Tests moved to `tests/engine.test.mjs` (16 Node tests), `scripts/ci_e2e.py`
+  now drives the Node CLI, and CI is four jobs: quality, engine tests, desktop
+  build, CLI recovery.
+- `forensics/` and the fixture helpers (`tests/helpers.py`,
+  `scripts/make_fixture.py`) stay as dev-only Python tooling; the app never
+  invokes Python.
 
 ### 2026-10-31 — session 6b: desktop uses Yassine's supplied frontend
 

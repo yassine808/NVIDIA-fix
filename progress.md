@@ -18,8 +18,8 @@
       the real window on the corrupted recording.
 - [ ] Package the desktop app (installer/exe) and retire the legacy UIs.
 - [x] Retire the legacy Python UIs; flatten the Electron app to the repo root.
-- [ ] Port the recovery engine from Python to TypeScript (then delete
-      `nvidia_fix.py` and `scripts/bridge.py`).
+- [x] Port the recovery engine from Python to TypeScript; delete `nvidia_fix.py`
+      and `scripts/bridge.py`.
 - [ ] 100% of the *original* opening: impossible from every local source.
 
 ## Environment rules
@@ -28,6 +28,27 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — recovery engine ported to TypeScript; Python app removed
+
+- Goal: remove the Python version of the app entirely and run the whole product
+  from the TypeScript codebase.
+- Done: new `src/engine/` (types, tools, probe, analyze, duplication, verify,
+  rebuild, process, cli, bridge) reproduces the Python engine's algorithm, JSON
+  report and CLI (`analyze`, `fix`, `explain`, `--version`). The Electron main
+  process now spawns `dist/engine/bridge.js` with `ELECTRON_RUN_AS_NODE` instead
+  of `python scripts/bridge.py`. Deleted `nvidia_fix.py`, `scripts/bridge.py` and
+  the Python test modules; added `tests/engine.test.mjs` (16 Node tests) and
+  pointed `scripts/ci_e2e.py` at the Node CLI. `scripts/stage-engine.js` no
+  longer stages Python; packaging copies `dist/engine` beside the app.
+- Verified: `npm test` 16/16; `python scripts/ci_e2e.py` passes against the real
+  CLI (clean start 4.000 s, 120 packets, 0 decode errors, input hash unchanged);
+  `npm run smoke` drove the real window through the TS engine and reached the
+  result page; a fixture recovery produced the same numbers as the Python
+  engine before deletion (clean start 4.0 s, 120 packets, identical first-packet
+  SHA-256).
+- Next: keep `forensics/` and the fixture helpers as dev-only Python tooling, or
+  port them too if they need to leave the repo.
 
 ### 2026-10-31 — Electron app moved to the repo root, Python UIs retired
 

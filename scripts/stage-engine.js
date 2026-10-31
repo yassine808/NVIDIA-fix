@@ -1,31 +1,31 @@
-// Stages what the packaged app needs beside the Electron code:
+// Stages the sidecar resources the packaged app needs:
 //
-//   .stage/engine/nvidia_fix.py            the recovery engine
-//   .stage/engine/scripts/bridge.py        the JSON-lines bridge
-//   .stage/engine/recovery/tools/ff/...    portable ffmpeg (if downloaded)
-//   .stage/icon.png                        window/taskbar icon
+//   .stage/engine/recovery/tools/ff/...  portable ffmpeg (if downloaded)
+//   .stage/icon.png                      window/taskbar icon
 //
-// electron-builder copies `.stage` into the app's resources folder, so the
-// packaged layout is resources/engine and resources/icon.png. The ffmpeg build
-// lives under recovery/ (git-ignored), so a machine without it - CI, a fresh
-// clone - still packages; that build then needs ffmpeg on PATH.
+// electron-builder copies `.stage` into the app's resources folder and copies
+// dist/engine there separately (see "extraResources" in package.json), so the
+// packaged layout is:
+//
+//   resources/engine/dist/engine/bridge.js   compiled recovery engine
+//   resources/engine/recovery/tools/ff/...   ffmpeg, when available
+//   resources/icon.png                       icon
+//
+// The ffmpeg build lives under recovery/ (git-ignored), so a machine without it
+// still packages; that build then needs ffmpeg on PATH.
 const fs = require("node:fs");
 const path = require("node:path");
 
-const here = __dirname;
-const root = path.resolve(here, "..");
-const repo = root;
+const root = path.resolve(__dirname, "..");
 const stage = path.join(root, ".stage");
 
 fs.rmSync(stage, { recursive: true, force: true });
-fs.mkdirSync(path.join(stage, "engine", "scripts"), { recursive: true });
+fs.mkdirSync(path.join(stage, "engine"), { recursive: true });
 
-fs.copyFileSync(path.join(repo, "nvidia_fix.py"), path.join(stage, "engine", "nvidia_fix.py"));
-fs.copyFileSync(path.join(here, "bridge.py"), path.join(stage, "engine", "scripts", "bridge.py"));
 fs.copyFileSync(path.join(root, "build", "icon.png"), path.join(stage, "icon.png"));
 
-// Portable ffmpeg: keep the <build>/bin/<tool>.exe shape nvidia_fix.py globs for.
-const ffRoot = path.join(repo, "recovery", "tools", "ff");
+// Keep the <build>/bin/<tool>.exe shape the engine globs for.
+const ffRoot = path.join(root, "recovery", "tools", "ff");
 let bundled = 0;
 if (fs.existsSync(ffRoot)) {
   for (const build of fs.readdirSync(ffRoot)) {
@@ -45,6 +45,6 @@ if (fs.existsSync(ffRoot)) {
 
 console.log(
   bundled
-    ? `staged engine + icon + ${bundled} ffmpeg binaries`
-    : "staged engine + icon (no bundled ffmpeg; the app will use PATH)"
+    ? `staged icon + ${bundled} ffmpeg binaries`
+    : "staged icon (no bundled ffmpeg; the app will use PATH)"
 );

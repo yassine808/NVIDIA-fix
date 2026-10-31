@@ -22,6 +22,8 @@ if str(ROOT) not in sys.path:
 
 from tests.helpers import corrupt_middle, make_clip  # noqa: E402
 
+CLI = ROOT / "dist" / "engine" / "cli.js"
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -33,7 +35,7 @@ def sha256(path: Path) -> str:
 
 def run_cli(*args: str) -> subprocess.CompletedProcess:
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "nvidia_fix.py"), *args],
+        [shutil.which("node") or "node", str(CLI), *args],
         cwd=str(ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
