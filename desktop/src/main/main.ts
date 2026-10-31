@@ -16,10 +16,20 @@ const SUPPORTED_SUFFIXES = new Set([".mp4", ".mov", ".m4v"]);
 const MAX_STDERR = 8 * 1024;
 
 const PYTHON = process.env.NVIDIA_FIX_PYTHON || "python";
-const ENGINE_ROOT = path.resolve(app.getAppPath(), "..");
+
+// Packaged: resources/engine/ holds nvidia_fix.py, bridge.py and the portable
+// ffmpeg build, so the app never depends on the checkout being next to it.
+// Development: the engine is the repository the desktop/ folder sits in.
+const PACKAGED = app.isPackaged;
+const ENGINE_ROOT = PACKAGED
+  ? path.join(process.resourcesPath, "engine")
+  : path.resolve(app.getAppPath(), "..");
 const BRIDGE =
   process.env.NVIDIA_FIX_BRIDGE ||
-  path.join(app.getAppPath(), "scripts", "bridge.py");
+  path.join(PACKAGED ? ENGINE_ROOT : app.getAppPath(), "scripts", "bridge.py");
+const APP_ICON = PACKAGED
+  ? path.join(process.resourcesPath, "icon.png")
+  : path.join(app.getAppPath(), "build", "icon.png");
 
 interface ActiveRun {
   child: ChildProcessWithoutNullStreams;
@@ -240,12 +250,15 @@ function runRecovery(request: RecoveryRequest): Promise<RecoveryResult> {
 
 function createWindow(): void {
   const win = new BrowserWindow({
-    width: 1060,
-    height: 780,
-    minWidth: 860,
-    minHeight: 620,
+    // Fixed size: the layout is designed for one window and never rescales.
+    width: 1188,
+    height: 734,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     backgroundColor: "#0c0e12",
     title: "NVIDIA-Fix",
+    icon: APP_ICON,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -267,6 +280,10 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Windows groups taskbar buttons by AppUserModelID; without it the window
+  // borrows the launcher's identity and shows the wrong icon.
+  app.setAppUserModelId("com.yassine808.nvidiafix");
+
   ipcMain.handle("app:info", (): AppInfo => {
     const sample = path.join(ENGINE_ROOT, "recovery", "Arc_Raiders corrupted.mp4");
     return {

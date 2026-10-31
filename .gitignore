@@ -16,3 +16,8 @@ recovery/
 *.m4v
 *.m4a
 *.mka
+
+# generated app icons are part of the identity, not build output
+!desktop/build/
+!desktop/build/icon.ico
+!desktop/build/icon.png

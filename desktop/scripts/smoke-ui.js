@@ -8,6 +8,7 @@
  *   npm run smoke -- --path "..\recovery\Arc_Raiders corrupted.mp4"
  */
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const APP_DIR = path.resolve(__dirname, "..");
@@ -21,6 +22,8 @@ function arg(name, fallback) {
 
 const videoPath = arg("path", "");
 const timeoutMs = Number(arg("timeout", "600000"));
+// Optional: --shot <dir> writes home.png and result.png from the real window.
+const shotDir = arg("shot", "");
 if (!videoPath) {
   console.error("Usage: node scripts/smoke-ui.js --path <video> [--timeout ms]");
   process.exit(2);
@@ -143,6 +146,7 @@ function killTree() {
     const cdp = await connect(target.webSocketDebuggerUrl);
     await cdp.send("Runtime.enable");
     await cdp.send("Log.enable");
+    await cdp.send("Page.enable");
     cdp.onEvent((message) => {
       if (message.method === "Runtime.exceptionThrown") {
         const details = message.params?.exceptionDetails;
@@ -179,6 +183,16 @@ function killTree() {
     if (!diagnostics || diagnostics.api !== "object" || !diagnostics.input) {
       throw new Error("Renderer did not expose the expected UI/API.");
     }
+
+    async function capture(name) {
+      if (!shotDir) return;
+      fs.mkdirSync(shotDir, { recursive: true });
+      const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+      const file = path.join(shotDir, name);
+      fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
+      console.log(`screenshot: ${file}`);
+    }
+    await capture("home.png");
 
     await cdp.evaluate(`(() => {
       const input = document.getElementById('video_path');
@@ -220,6 +234,7 @@ function killTree() {
         }
         console.log("\n--- result page ---");
         console.log(text.replace(/\n{2,}/g, "\n").trim());
+        await capture("result.png");
         console.log("\nSMOKE TEST PASSED");
         cdp.close();
         killTree();

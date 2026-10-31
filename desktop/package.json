@@ -1,6 +1,6 @@
 {
   "name": "nvidia-fix-desktop",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Desktop front end for the NVIDIA-Fix recovery engine",
   "main": "dist/main/main.js",
@@ -8,11 +8,46 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron .",
-    "smoke": "node scripts/smoke-ui.js"
+    "smoke": "node scripts/smoke-ui.js",
+    "dist": "npm run build && node scripts/stage-engine.js && electron-builder --win portable"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
     "electron": "^45.2.1",
+    "electron-builder": "^26.0.12",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.yassine808.nvidiafix",
+    "productName": "NVIDIA-Fix",
+    "copyright": "Yassine",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".stage",
+        "to": "."
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "NVIDIA-Fix-${version}-portable.exe"
+    }
   }
 }
