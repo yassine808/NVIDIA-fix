@@ -9,6 +9,10 @@ update **Mission log** before you stop working.
   measurement (byte ranges, hashes, frame counts). "It plays" is not "100%".
 - If a byte range of the original media is provably gone, say so and quantify
   it. Never present a reconstruction as the original footage.
+- **Throttle heavy runs.** Yassine games on this machine, so any local process
+  that can saturate the box (ffmpeg, drive scans, full decodes) runs at
+  `BelowNormal` priority and no more than 2 threads, and never takes a GPU or
+  hwaccel path. There is no hardware decode in this toolchain by design.
 - The input recording is opened **read-only** in every tool under `recovery/`.
 - Never commit media. `recovery/` and `*.mp4|*.mov|*.m4v|*.m4a|*.mka` are ignored.
 - No silent guesses about container structure: MP4 `co64` vs `stco` burned us
@@ -157,6 +161,28 @@ not file damage), no unclassified output, no retry attempts needed.
 - [x] Commit + push (1.1.1, `2863c0d`).
 
 ## Mission log
+
+### 2026-10-31 — session 3: the app reports duplicated vs destroyed
+
+- `explain` verdict is now part of `process()`'s report: every recovery writes
+  `duplication` (seconds copied later, seconds destroyed, block counts, the
+  container→content copy window) when the map sits next to the input. A missing
+  or unreadable map becomes `{"unavailable": …}`, never a silent omission, and
+  never blocks the recovery itself.
+- `desktop.py` result card now says what the missing prefix *is*: "N s of it is
+  a copy of later footage and M s exists nowhere in this file", falling back to
+  the old wording when no map is present.
+- README gains a "How much is duplicated, how much is gone" block plus the
+  `explain` CLI example. New rule in Ground rules: heavy runs go BelowNormal,
+  ≤2 threads, no GPU (Yassine games on this box).
+- Verified: real `fix --no-full-decode` run produced
+  `status: success`, 0 decode errors and
+  `duplication = {damaged 113.781922, duplicated 105.73, destroyed 8.051922,
+  matched 614/760}`; `tests/test_explain.py` 7/7, `tests/test_parsers.py` 6/6;
+  `desktop.py` imports clean. Temp output deleted afterwards.
+- Still open: the donor hunt (running at BelowNormal as this was written — see
+  `progress.md` for its result), the co64/duplication regression tests, and the
+  100% goal.
 
 ### 2026-10-31 — session 2 close-out: the fixes are published
 

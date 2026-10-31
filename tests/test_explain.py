@@ -78,6 +78,17 @@ class RecordedMapTests(unittest.TestCase):
         self.assertEqual(verdict.first_match, (0.12, 182.54))
         self.assertEqual(verdict.last_match, (107.54, 299.79))
 
+    def test_loader_finds_the_map_next_to_the_recording(self):
+        verdict = nvidia_fix.load_duplication_verdict(REAL_MAP.parent / "recording.mp4", 113.782)
+        self.assertEqual(verdict.map_path, REAL_MAP)
+
+
+class MapLookupTests(unittest.TestCase):
+    def test_missing_map_names_the_command_that_makes_one(self):
+        with self.assertRaises(nvidia_fix.NvidiaFixError) as ctx:
+            nvidia_fix.load_duplication_verdict(Path("tmp-does-not-exist"), 12.0)
+        self.assertIn("forensics/duplication_dense.py", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

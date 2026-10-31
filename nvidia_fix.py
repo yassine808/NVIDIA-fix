@@ -516,13 +516,25 @@ def duplication_verdict(rows: Sequence[Dict[str, object]], damaged_seconds: floa
     )
 
 
-def explain(path: str | Path, map_path: Optional[str | Path] = None) -> Dict[str, object]:
-    """Report what the damaged prefix is: copied later, or destroyed.
+def load_duplication_verdict(source: Path, damaged_seconds: float,
+                             map_path: Optional[str | Path] = None) -> DuplicationVerdict:
+    """Read the map produced by `forensics/duplication_dense.py`.
 
-    Requires the map produced by `forensics/duplication_dense.py` — it is a
-    measurement, not something this engine should re-derive with a coarser scan
-    and then quote as if it were the same number.
+    The split is a measurement, so a missing map is an error with the command
+    needed to produce one — never a silent fallback to a coarser guess.
     """
+    target = Path(map_path).expanduser() if map_path else Path(source).parent / DUPLICATION_MAP_NAME
+    if not target.is_file():
+        raise NvidiaFixError(
+            f"No duplication map at {target}. Generate it with:\n"
+            f"  PYTHONPATH=forensics python forensics/duplication_dense.py"
+        )
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    return duplication_verdict(payload.get("rows") or [], damaged_seconds, target)
+
+
+def explain(path: str | Path, map_path: Optional[str | Path] = None) -> Dict[str, object]:
+    """Report what the damaged prefix is: copied later, or destroyed."""
     analysis = analyze(path)
     result: Dict[str, object] = {
         "tool": TOOL,
@@ -535,14 +547,7 @@ def explain(path: str | Path, map_path: Optional[str | Path] = None) -> Dict[str
 
     duration = _probe_duration(analysis.path)
     damaged = float(analysis.last_bad.pts)
-    target = Path(map_path).expanduser() if map_path else analysis.path.parent / DUPLICATION_MAP_NAME
-    if not target.is_file():
-        raise NvidiaFixError(
-            f"No duplication map at {target}. Generate it with:\n"
-            f"  PYTHONPATH=forensics python forensics/duplication_dense.py"
-        )
-    payload = json.loads(target.read_text(encoding="utf-8"))
-    verdict = duplication_verdict(payload.get("rows") or [], damaged, target)
+    verdict = load_duplication_verdict(analysis.path, damaged, map_path)
 
     recoverable = max(0.0, duration - damaged)
     result.update({
@@ -845,6 +850,14 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
         duration = _float((output_media.get("video") or {}).get("duration"), duration)
     except NvidiaFixError:
         pass
+    duplication: Optional[Dict[str, object]] = None
+    if analysis.last_bad is not None:
+        try:
+            duplication = load_duplication_verdict(source, float(analysis.last_bad.pts)).to_dict()
+        except (NvidiaFixError, OSError, ValueError) as exc:
+            # The recovery itself is unaffected; only the "why" is unavailable.
+            duplication = {"unavailable": str(exc)}
+
     report: Dict[str, object] = {
         **analysis_doc,
         "status": "success" if decode_check.ok and not decode_check.unclassified
@@ -868,6 +881,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             "full_decode_returncode": decode_check.returncode,
             "attempts": attempts,
         },
+        "duplication": duplication,
         "caveat": CAVEAT,
     }
     if decode_errors:

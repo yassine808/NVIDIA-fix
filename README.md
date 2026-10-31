@@ -133,6 +133,9 @@ python nvidia_fix.py fix "D:\Videos\clip.mp4" --out "D:\Recovered" --no-full-dec
 # machine-readable output
 python nvidia_fix.py analyze "D:\Videos\clip.mp4" --json
 python nvidia_fix.py fix "D:\Videos\clip.mp4" --json
+
+# how much of the damaged opening is a copy of later footage, and how much is gone
+python nvidia_fix.py explain "D:\Videos\clip.mp4"
 ```
 
 Exit codes: `0` success (including an already-healthy file), `2` a handled error
@@ -175,6 +178,26 @@ The detector and cut were validated against a 439,194,252-byte ShadowPlay DVR:
 The early video in that file was overwritten by a drifting copy of later
 footage, then replaced by high-entropy garbage with no recoverable reference
 frames. That section is not recoverable from this file, and the app says so.
+
+### How much is duplicated, how much is gone
+
+`nvidia_fix.py explain` answers that from the recorded duplication map
+(`forensics/duplication_dense.py`), clipped at the measured damaged boundary:
+
+```
+Damaged prefix : 113.782 s
+  copied later : 105.730 s (92.9% of the prefix, 80.8% of the scanned blocks)
+  destroyed    : 8.052 s
+  copy window  : container 0.12 s -> content 182.54 s ... 107.54 s -> 299.79 s
+Recoverable    : 186.231 s of 300.013 s (62.1%)
+```
+
+So the missing 113.782 s is not 113.782 s of vanished pictures: 105.730 s of it
+is a byte-shifted copy of footage that still exists later in the file (which is
+why the opening plays smeared and duplicated), and **8.052 s exists nowhere in
+these bytes**. No repair tool restores the original 300 s from this file. The
+same numbers appear in the recovery report as `duplication`, and in the desktop
+app under the result card.
 
 ## Supported input
 

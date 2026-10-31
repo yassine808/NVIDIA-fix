@@ -867,11 +867,24 @@ class DesktopApp:
         self.stat_packets.set(f"{int(video.get('packets') or 0):,}")
         self.stat_errors.set(str(video.get("decode_errors", 0)))
         self.saved_path.set(str(Path(result["paths"]["video"]).parent))
-        self.caveat_var.set(
-            f"Footage before {_timecode(corruption.get('last_bad_seconds'))} "
-            "was overwritten and cannot be rebuilt; the clean tail and early "
-            "audio are saved."
-        )
+        before = _timecode(corruption.get("last_bad_seconds"))
+        duplication = result.get("duplication") or {}
+        if duplication.get("duplicated_seconds") is not None:
+            # Say what the missing prefix actually is, instead of "overwritten"
+            # and letting the reader guess whether anything could come back.
+            self.caveat_var.set(
+                f"Footage before {before} was overwritten in place: "
+                f"{duplication['duplicated_seconds']:.1f} s of it is a copy of "
+                f"later footage and {duplication['destroyed_seconds']:.1f} s "
+                "exists nowhere in this file. The clean tail and early audio "
+                "are saved; only a second source can restore the rest."
+            )
+        else:
+            self.caveat_var.set(
+                f"Footage before {before} "
+                "was overwritten and cannot be rebuilt; the clean tail and early "
+                "audio are saved."
+            )
 
         errors = int(video.get("decode_errors") or 0)
         self.errors_stat.config(fg=GOOD if not errors else BAD)
