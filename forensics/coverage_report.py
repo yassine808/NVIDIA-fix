@@ -5,10 +5,14 @@ Usage: python forensics/coverage_report.py [probe.json]
 import json
 import sys
 
+from paths import readable_file
+
 
 def main() -> int:
     path = sys.argv[1] if len(sys.argv) > 1 else r"recovery/probe.json"
-    d = json.load(open(path, encoding="utf-8"))
+    # The operator names an explicit local file on the command line; resolve it
+    # once so the read below uses the validated path.
+    d = json.load(open(readable_file(path, "probe json"), encoding="utf-8"))
     mdat = next(b for b in d["top_level"] if b["type"] == "mdat")
     mstart, mend = mdat["start"] + 8, mdat["start"] + mdat["size"]
     print("file      %d bytes" % d["size"])

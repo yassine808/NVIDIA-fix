@@ -14,6 +14,10 @@ const path = require("node:path");
 const APP_DIR = path.resolve(__dirname, "..");
 const ELECTRON = require("electron");
 const PORT = 9333;
+// Absolute path: the system directory is fixed and not writable by a standard
+// user, unlike whatever PATH happens to point at. SystemRoot is the OS's own
+// answer for the Windows drive, with the conventional location as fallback.
+const TASKKILL = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -27,10 +31,6 @@ const shotDir = arg("shot", "");
 if (!videoPath) {
   console.error("Usage: node scripts/smoke-ui.js --path <video> [--timeout ms]");
   process.exit(2);
-}
-
-if (!process.env.NVIDIA_FIX_PYTHON) {
-  console.log("python: default (python)");
 }
 
 const child = spawn(ELECTRON, [".", `--remote-debugging-port=${PORT}`], {
@@ -50,22 +50,53 @@ child.on("exit", (code) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Retries `check` until it returns a truthy value or the deadline passes.
+ * `check` may throw to stop early; `detail` renders the last value into the
+ * timeout message.
+ */
+function poll(check, options) {
+  const deadline = Date.now() + options.timeoutMs;
+  let last = null;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      Promise.resolve()
+        .then(check)
+        .then((value) => {
+          last = value;
+          if (value) {
+            resolve(value);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            const detail = options.detail ? options.detail(last) : "";
+            reject(new Error(options.timeoutMessage + detail));
+            return;
+          }
+          setTimeout(attempt, options.intervalMs);
+        }, reject);
+    };
+    attempt();
+  });
+}
+
 async function findTarget() {
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${PORT}/json/list`);
-      const targets = await response.json();
-      const page = targets.find(
-        (target) => target.type === "page" && String(target.url).includes("index.html")
-      );
-      if (page && page.webSocketDebuggerUrl) return page;
-    } catch {
-      // Electron is still starting.
-    }
-    await sleep(400);
-  }
-  throw new Error("The Electron window never exposed a debugging target.");
+  return poll(
+    async () => {
+      try {
+        const response = await fetch(`http://127.0.0.1:${PORT}/json/list`);
+        const targets = await response.json();
+        const page = targets.find(
+          (target) => target.type === "page" && String(target.url).includes("index.html")
+        );
+        return page?.webSocketDebuggerUrl ? page : null;
+      } catch {
+        // Electron is still starting.
+        return null;
+      }
+    },
+    { timeoutMs: 30000, intervalMs: 400, timeoutMessage: "The Electron window never exposed a debugging target." }
+  );
 }
 
 function connect(url) {
@@ -131,7 +162,7 @@ function connect(url) {
 
 function killTree() {
   if (process.platform === "win32" && child.pid) {
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+    spawn(TASKKILL, ["/pid", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
       windowsHide: true,
     });
@@ -140,111 +171,137 @@ function killTree() {
   }
 }
 
-(async () => {
-  try {
-    const target = await findTarget();
-    const cdp = await connect(target.webSocketDebuggerUrl);
-    await cdp.send("Runtime.enable");
-    await cdp.send("Log.enable");
-    await cdp.send("Page.enable");
-    cdp.onEvent((message) => {
-      if (message.method === "Runtime.exceptionThrown") {
-        const details = message.params?.exceptionDetails;
-        console.error(
-          "renderer exception:",
-          details?.exception?.description || details?.text || "(unknown)"
-        );
-      } else if (message.method === "Log.entryAdded") {
-        const entry = message.params?.entry;
-        if (entry && ["error", "warning"].includes(entry.level)) {
-          console.error(`renderer ${entry.level}:`, entry.text);
-        }
-      }
-    });
-
-    await cdp.evaluate(`location.href`);
-    const loadDeadline = Date.now() + 15000;
-    let diagnostics = null;
-    while (Date.now() < loadDeadline) {
-      diagnostics = await cdp.evaluate(`({
-        ready: document.readyState,
-        api: typeof window.nvidiaFix,
-        input: Boolean(document.getElementById('video_path')),
-        title: document.title,
-        href: location.href,
-        version: document.getElementById('version')?.textContent,
-        body: document.body ? document.body.innerText.slice(0, 400) : '',
-        scripts: Array.from(document.scripts).map((s) => s.src)
-      })`);
-      if (diagnostics.ready === "complete" && diagnostics.input) break;
-      await sleep(300);
+function reportRendererEvent(message) {
+  if (message.method === "Runtime.exceptionThrown") {
+    const details = message.params?.exceptionDetails;
+    console.error(
+      "renderer exception:",
+      details?.exception?.description || details?.text || "(unknown)"
+    );
+  } else if (message.method === "Log.entryAdded") {
+    const entry = message.params?.entry;
+    if (entry && ["error", "warning"].includes(entry.level)) {
+      console.error(`renderer ${entry.level}:`, entry.text);
     }
-    console.log("renderer diagnostics:", JSON.stringify(diagnostics));
-    if (!diagnostics || diagnostics.api !== "object" || !diagnostics.input) {
-      throw new Error("Renderer did not expose the expected UI/API.");
+  }
+}
+
+async function openSession() {
+  const target = await findTarget();
+  const cdp = await connect(target.webSocketDebuggerUrl);
+  await cdp.send("Runtime.enable");
+  await cdp.send("Log.enable");
+  await cdp.send("Page.enable");
+  cdp.onEvent(reportRendererEvent);
+  return cdp;
+}
+
+const HOME_STATE = `({
+  ready: document.readyState,
+  api: typeof window.nvidiaFix,
+  input: Boolean(document.getElementById('video_path')),
+  title: document.title,
+  href: location.href,
+  version: document.getElementById('version')?.textContent,
+  body: document.body ? document.body.innerText.slice(0, 400) : '',
+  scripts: Array.from(document.scripts).map((s) => s.src)
+})`;
+
+async function waitForHome(cdp) {
+  let last = null;
+  const diagnostics = await poll(
+    async () => {
+      last = await cdp.evaluate(HOME_STATE);
+      return last.ready === "complete" && last.input ? last : null;
+    },
+    {
+      timeoutMs: 15000,
+      intervalMs: 300,
+      timeoutMessage: "Renderer did not expose the expected UI/API.",
+      detail: () => ` last state: ${JSON.stringify(last)}`,
     }
+  );
+  console.log("renderer diagnostics:", JSON.stringify(diagnostics));
+  if (diagnostics.api !== "object") {
+    throw new Error("Renderer did not expose the expected UI/API.");
+  }
+  return diagnostics;
+}
 
-    async function capture(name) {
-      if (!shotDir) return;
-      fs.mkdirSync(shotDir, { recursive: true });
-      const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
-      const file = path.join(shotDir, name);
-      fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
-      console.log(`screenshot: ${file}`);
-    }
-    await capture("home.png");
+async function capture(cdp, name) {
+  if (!shotDir) return;
+  fs.mkdirSync(shotDir, { recursive: true });
+  const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+  const file = path.join(shotDir, name);
+  fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
+  console.log(`screenshot: ${file}`);
+}
 
-    await cdp.evaluate(`(() => {
-      const input = document.getElementById('video_path');
-      input.value = ${JSON.stringify(videoPath)};
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      document.querySelector('input[name=full_decode]').checked = true;
-      const go = document.getElementById('go');
-      if (go.disabled) throw new Error('Recover button stayed disabled.');
-      go.click();
-      return true;
-    })()`);
+async function startRecovery(cdp) {
+  return cdp.evaluate(`(() => {
+    const input = document.getElementById('video_path');
+    input.value = ${JSON.stringify(videoPath)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('input[name=full_decode]').checked = true;
+    const go = document.getElementById('go');
+    if (go.disabled) throw new Error('Recover button stayed disabled.');
+    go.click();
+    return true;
+  })()`);
+}
 
-    const deadline = Date.now() + timeoutMs;
-    let lastLog = "";
-    while (Date.now() < deadline) {
-      await sleep(1000);
-      const state = await cdp.evaluate(`(() => {
-        const result = document.getElementById('result');
-        const error = document.getElementById('note');
-        const log = document.getElementById('steps');
-        return {
-          done: Boolean(result && !result.hidden),
-          error: Boolean(error && !error.hidden),
-          text: error && !error.hidden ? error.textContent : '',
-          log: log ? log.innerText : '',
-          page: document.body.innerText,
-        };
-      })()`);
+const RESULT_STATE = `(() => {
+  const result = document.getElementById('result');
+  const error = document.getElementById('note');
+  const log = document.getElementById('steps');
+  return {
+    done: Boolean(result && !result.hidden),
+    error: Boolean(error && !error.hidden),
+    text: error && !error.hidden ? error.textContent : '',
+    log: log ? log.innerText : '',
+    page: document.body.innerText,
+  };
+})()`;
 
+async function waitForResult(cdp) {
+  let lastLog = "";
+  return poll(
+    async () => {
+      const state = await cdp.evaluate(RESULT_STATE);
       if (state.log && state.log !== lastLog) {
         lastLog = state.log;
         for (const line of state.log.split("\n").slice(-2)) console.log(`  · ${line}`);
       }
       if (state.error) throw new Error(state.text || "The UI reported an error.");
-      if (state.done) {
-        const text = state.page || "";
-        if (!/Clean video/i.test(text)) {
-          throw new Error("The result page did not list the recovered video.");
-        }
-        console.log("\n--- result page ---");
-        console.log(text.replace(/\n{2,}/g, "\n").trim());
-        await capture("result.png");
-        console.log("\nSMOKE TEST PASSED");
-        cdp.close();
-        killTree();
-        process.exit(0);
-      }
-    }
-    throw new Error("Timed out waiting for the recovery result.");
-  } catch (error) {
-    console.error(`SMOKE TEST FAILED: ${error.message}`);
-    killTree();
-    process.exit(1);
+      return state.done ? state : null;
+    },
+    { timeoutMs, intervalMs: 1000, timeoutMessage: "Timed out waiting for the recovery result." }
+  );
+}
+
+async function main() {
+  const cdp = await openSession();
+  await waitForHome(cdp);
+  await capture(cdp, "home.png");
+
+  await startRecovery(cdp);
+  const state = await waitForResult(cdp);
+
+  const text = state.page || "";
+  if (!/Clean video/i.test(text)) {
+    throw new Error("The result page did not list the recovered video.");
   }
-})();
+  console.log("\n--- result page ---");
+  console.log(text.replace(/\n{2,}/g, "\n").trim());
+  await capture(cdp, "result.png");
+  console.log("\nSMOKE TEST PASSED");
+  cdp.close();
+  killTree();
+  process.exit(0);
+}
+
+void main().catch((error) => {
+  console.error(`SMOKE TEST FAILED: ${error.message}`);
+  killTree();
+  process.exit(1);
+});

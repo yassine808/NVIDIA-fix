@@ -7,10 +7,24 @@ import * as path from "node:path";
 
 import { NvidiaFixError, ProcessingError } from "./errors";
 
+// Look in known absolute roots before falling back to PATH. SystemRoot and
+// ProgramFiles are set by Windows itself, so a tool found there is the one the
+// machine actually ships; PATH is last because it is user-writable.
+function searchDirectories(): string[] {
+  const dirs: string[] = [];
+  const systemRoot = process.env.SystemRoot;
+  const programFiles = process.env.ProgramFiles;
+  const programFilesX86 = process.env["ProgramFiles(x86)"];
+  if (systemRoot) dirs.push(path.join(systemRoot, "System32"));
+  if (programFiles) dirs.push(path.join(programFiles, "ffmpeg", "bin"));
+  if (programFilesX86) dirs.push(path.join(programFilesX86, "ffmpeg", "bin"));
+  dirs.push(...(process.env.PATH ?? "").split(path.delimiter));
+  return dirs.filter((dir) => Boolean(dir));
+}
+
 function which(name: string): string | null {
   const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (!dir) continue;
+  for (const dir of searchDirectories()) {
     for (const ext of exts) {
       const candidate = path.join(dir, name + ext);
       try {
@@ -21,6 +35,13 @@ function which(name: string): string | null {
     }
   }
   return null;
+}
+
+/** The PowerShell that ships with Windows, or the bare name as a fallback. */
+function powershellPath(): string {
+  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const absolute = path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return fs.existsSync(absolute) ? absolute : "powershell";
 }
 
 function bundled(name: string): string | null {
@@ -49,7 +70,9 @@ function bundled(name: string): string | null {
 function resolveTool(name: string, envVar: string): string {
   const explicit = process.env[envVar];
   if (explicit) return explicit;
-  return which(name) ?? bundled(name) ?? name;
+  // The copy shipped beside the app wins over PATH: it is the build this
+  // version was tested with, and it exists on machines with no ffmpeg at all.
+  return bundled(name) ?? which(name) ?? name;
 }
 
 export const FFMPEG = resolveTool("ffmpeg", "FFMPEG_BINARY");
@@ -73,7 +96,7 @@ function lowerPriority(pid: number): void {
   // Node cannot pass CREATE_BELOW_NORMAL_PRIORITY_CLASS to spawn, so ask
   // PowerShell once, after the process exists. Best effort by design.
   const child = spawn(
-    "powershell",
+    powershellPath(),
     [
       "-NoProfile",
       "-NonInteractive",
@@ -164,20 +187,24 @@ export async function ffprobeJson(args: string[], timeoutMs = 300_000): Promise<
 
 /** Probe once up front so a missing tool is an immediate, readable error. */
 export async function ensureTools(): Promise<void> {
-  const missing: string[] = [];
-  for (const [name, binary] of [
+  const tools: Array<[string, string]> = [
     ["ffmpeg", FFMPEG],
     ["ffprobe", FFPROBE],
-  ]) {
-    try {
-      await run([binary, "-version"], { check: false, timeoutMs: 20_000 });
-    } catch {
-      missing.push(name);
-    }
-  }
+  ];
+  const results = await Promise.all(
+    tools.map(async ([name, binary]) => {
+      try {
+        await run([binary, "-version"], { check: false, timeoutMs: 20_000 });
+        return null;
+      } catch {
+        return name;
+      }
+    })
+  );
+  const missing = results.filter((name): name is string => name !== null);
   if (missing.length > 0) {
     throw new NvidiaFixError(
-      `Missing required tool(s): ${missing.join(", ")}. Install ffmpeg (which includes ffprobe) and put both on PATH.`
+      `Missing required tool(s): ${missing.join(", ")}. Run "npm run fetch-ffmpeg" to download the bundled build, or install ffmpeg (which includes ffprobe) and put both on PATH.`
     );
   }
 }

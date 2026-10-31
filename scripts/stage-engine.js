@@ -24,13 +24,18 @@ fs.mkdirSync(path.join(stage, "engine"), { recursive: true });
 
 fs.copyFileSync(path.join(root, "build", "icon.png"), path.join(stage, "icon.png"));
 
-// Keep the <build>/bin/<tool>.exe shape the engine globs for.
+// Keep the <build>/bin/<tool>.exe shape the engine globs for, newest build only
+// so the installer never carries two copies of ffmpeg.
 const ffRoot = path.join(root, "recovery", "tools", "ff");
 let bundled = 0;
 if (fs.existsSync(ffRoot)) {
-  for (const build of fs.readdirSync(ffRoot)) {
+  const builds = fs
+    .readdirSync(ffRoot)
+    .filter((build) => fs.existsSync(path.join(ffRoot, build, "bin")))
+    .sort();
+  const build = builds[builds.length - 1];
+  if (build) {
     const bin = path.join(ffRoot, build, "bin");
-    if (!fs.existsSync(bin)) continue;
     const dest = path.join(stage, "engine", "recovery", "tools", "ff", build, "bin");
     fs.mkdirSync(dest, { recursive: true });
     for (const tool of ["ffmpeg.exe", "ffprobe.exe"]) {

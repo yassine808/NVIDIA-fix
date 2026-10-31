@@ -29,19 +29,17 @@ def find_all(hay: bytes, needle: bytes):
         i += 1
 
 
-def main() -> int:
-    size = os.path.getsize(VIDEO)
-    tracks, top, _s = load_tracks(VIDEO)
-    vtr = next(t for t in tracks if t.get("handler") == "vide")
-    intervals = vtr["intervals"]
-    timescale = vtr.get("timescale") or 1
+def sample_times(stts):
     ts, t = [], 0
-    for cnt, d in vtr["stts"]:
+    for cnt, d in stts:
         for _ in range(cnt):
             ts.append(t)
             t += d
+    return ts
 
-    r = Reader(VIDEO, window=1 << 20)
+
+def collect_probes(r: Reader, intervals):
+    """One damaged sample every ~12 s, as (offset, size, sample_index, second)."""
     probes = []
     for target in range(2, 300, 12):
         t0 = target * 120
@@ -50,32 +48,55 @@ def main() -> int:
             if sz < 2048:
                 continue
             blob = r.read(off, sz)
-            n, consumed, _ = nal_chain(blob)
+            _n, consumed, _ = nal_chain(blob)
             if consumed != sz:          # damaged sample
                 probes.append((off, sz, si, target))
                 break
-    print("probes:", [(p[3], p[0]) for p in probes])
+    return probes
 
+
+def search_copies(fh, size: int, needle: bytes):
+    """Every file offset where `needle` occurs, scanning in CHUNK-sized reads."""
+    hits = []
+    pos = 0
+    while pos < size:
+        fh.seek(pos)
+        hay = fh.read(CHUNK + PROBE)
+        if not hay:
+            break
+        for i in find_all(hay, needle):
+            hits.append(pos + i)
+        pos += CHUNK
+    return hits
+
+
+def run_probes(r: Reader, video: str, size: int, probes):
     results = []
-    for off, sz, si, target in probes:
+    for off, sz, _si, target in probes:
         needle = r.read(off + sz // 3, PROBE)
-        hits = []
-        with open(VIDEO, "rb") as fh:
-            pos = 0
-            while pos < size:
-                fh.seek(pos)
-                hay = fh.read(CHUNK + PROBE)
-                if not hay:
-                    break
-                for i in find_all(hay, needle):
-                    hits.append(pos + i)
-                pos += CHUNK
+        with open(video, "rb") as fh:
+            hits = search_copies(fh, size, needle)
         elsewhere = [h for h in hits if abs(h - (off + sz // 3)) > 4]
         results.append({"t": target, "offset": off, "size": sz,
                         "sha": hashlib.sha1(needle).hexdigest()[:12],
                         "hits": len(hits), "elsewhere": elsewhere[:5]})
         print("t=%3ds off=%9d size=%5d  self_hits=%d elsewhere=%s"
               % (target, off, sz, len(hits), elsewhere[:5]))
+    return results
+
+
+def main() -> int:
+    size = os.path.getsize(VIDEO)
+    tracks, _top, _s = load_tracks(VIDEO)
+    vtr = next(t for t in tracks if t.get("handler") == "vide")
+    intervals = vtr["intervals"]
+    ts = sample_times(vtr["stts"])
+
+    r = Reader(VIDEO, window=1 << 20)
+    probes = collect_probes(r, intervals)
+    print("probes:", [(p[3], p[0]) for p in probes])
+
+    results = run_probes(r, VIDEO, size, probes)
     r.close()
     json.dump(results, open("recovery/byte_dup.json", "w"), indent=1)
     hits_total = sum(1 for x in results if x["elsewhere"])

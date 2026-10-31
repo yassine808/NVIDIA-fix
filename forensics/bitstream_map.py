@@ -42,7 +42,7 @@ def load_tracks(video: str):
             pos += sz
         fh.seek(moov_range[0])
         moov = fh.read(moov_range[1] - moov_range[0])
-    tracks = [P.parse_track(moov, ps, pe, size)
+    tracks = [P.parse_track(moov, ps, pe)
               for bt, ps, pe, _b, _bad in P.boxes(moov, 0, len(moov))
               if bt == b"trak"]
     return tracks, top, size
@@ -68,18 +68,17 @@ def lock_points(r: Reader, start: int, end: int, limit: int = 8,
     return hits
 
 
-def main() -> int:
-    tracks, top, size = load_tracks(VIDEO)
-    vtr = next(t for t in tracks if t.get("handler") == "vide")
-    intervals = vtr["intervals"]
-    timescale = vtr.get("timescale") or 1
+def sample_times(stts):
     ts, t = [], 0
-    for cnt, d in vtr["stts"]:
+    for cnt, d in stts:
         for _ in range(cnt):
             ts.append(t)
             t += d
+    return ts
 
-    r = Reader(VIDEO, window=8 << 20)
+
+def score_intervals(r: Reader, intervals, ts, timescale: int):
+    """Bucket per-10s parse/exact counts at offset 0 and +32."""
     buckets = {}
     for off, sz, si in intervals:
         blob0 = r.read(off, sz)
@@ -101,7 +100,10 @@ def main() -> int:
             acc[2] += 1 if ex0 else 0
             acc[3] += 1 if ok32 else 0
             acc[4] += 1 if ex32 else 0
+    return buckets
 
+
+def print_buckets(buckets) -> None:
     print(" t(s)  samples  parse@0  exact@0  parse@32  exact@32")
     for b in sorted(buckets):
         a = buckets[b]
@@ -109,6 +111,9 @@ def main() -> int:
               % (b, a[0], 100.0 * a[1] / a[0], 100.0 * a[2] / a[0],
                  100.0 * a[3] / a[0], 100.0 * a[4] / a[0]))
 
+
+def print_tail(r: Reader, top, intervals) -> None:
+    """Report the unreferenced tail: size, lock points and hex probes."""
     mdat = next(b for b in top if b["type"] == "mdat")
     mstart, mend = mdat["start"] + 8, mdat["start"] + mdat["size"]
     covered_end = max(off + sz for off, sz, _ in intervals)
@@ -127,6 +132,18 @@ def main() -> int:
         blob = r.read(probe, 64)
         print("  %d: %s" % (probe, blob.hex()))
 
+
+def main() -> int:
+    tracks, top, _size = load_tracks(VIDEO)
+    vtr = next(t for t in tracks if t.get("handler") == "vide")
+    intervals = vtr["intervals"]
+    timescale = vtr.get("timescale") or 1
+    ts = sample_times(vtr["stts"])
+
+    r = Reader(VIDEO, window=8 << 20)
+    buckets = score_intervals(r, intervals, ts, timescale)
+    print_buckets(buckets)
+    print_tail(r, top, intervals)
     r.close()
     return 0
 

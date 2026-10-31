@@ -16,27 +16,38 @@ from sample_map import Reader, nal_chain
 VIDEO = r"recovery/Arc_Raiders corrupted.mp4"
 
 
+def sample_times(stts):
+    ts, t = [], 0
+    for cnt, d in stts:
+        for _ in range(cnt):
+            ts.append(t)
+            t += d
+    return ts
+
+
+def find_bad(r: Reader, intervals, limit: int = 3):
+    """Newest samples (from the tail) whose payload does not parse as AVCC."""
+    bad = []
+    for off, sz, si in reversed(intervals):
+        blob = r.read(off, sz)
+        _n, consumed, _ = nal_chain(blob, max_nals=64) if len(blob) == sz else (0, 0, 0)
+        if consumed != sz:
+            bad.append(si)
+            if len(bad) >= limit:
+                break
+    return bad
+
+
 def main() -> int:
-    tracks, top, size = load_tracks(VIDEO)
+    tracks, _top, _size = load_tracks(VIDEO)
     vtr = next(t for t in tracks if t.get("handler") == "vide")
     intervals = vtr["intervals"]
     syncs = set(vtr.get("sync_samples") or [])
     timescale = vtr.get("timescale") or 1
-    ts, t = [], 0
-    for cnt, d in vtr["stts"]:
-        for _ in range(cnt):
-            ts.append(t)
-            t += d
+    ts = sample_times(vtr["stts"])
 
     r = Reader(VIDEO, window=16 << 20)
-    bad = []
-    for off, sz, si in reversed(intervals):
-        blob = r.read(off, sz)
-        n, consumed, _ = nal_chain(blob, max_nals=64) if len(blob) == sz else (0, 0, 0)
-        if consumed != sz:
-            bad.append(si)
-            if len(bad) >= 3:
-                break
+    bad = find_bad(r, intervals)
     r.close()
 
     last_bad = max(bad) if bad else -1

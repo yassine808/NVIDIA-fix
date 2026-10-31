@@ -2,7 +2,7 @@
   "name": "nvidia-fix",
   "version": "1.2.0",
   "private": true,
-  "description": "Recover the clean tail of a corrupted NVIDIA ShadowPlay recording",
+  "description": "Fix corrupted NVIDIA ShadowPlay / Instant Replay recordings: recover the clean tail without re-encoding, and see exactly what was destroyed",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
@@ -11,7 +11,8 @@
     "smoke": "node scripts/smoke-ui.js",
     "engine": "node dist/engine/cli.js",
     "test": "npm run build && node --test tests/engine.test.mjs",
-    "dist": "npm run build && node scripts/stage-engine.js && electron-builder --win portable"
+    "dist": "node scripts/fetch-ffmpeg.js && npm run build && node scripts/stage-engine.js && electron-builder --win portable",
+    "fetch-ffmpeg": "node scripts/fetch-ffmpeg.js"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

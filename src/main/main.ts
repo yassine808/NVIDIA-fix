@@ -39,12 +39,26 @@ let mainWindow: BrowserWindow | null = null;
 
 function cleanPath(raw: string): string {
   let text = String(raw ?? "").trim();
-  if (text.length >= 2 && text[0] === text[text.length - 1] && (text[0] === '"' || text[0] === "'")) {
+  const quote = text.at(0) ?? "";
+  if (text.length >= 2 && (quote === '"' || quote === "'") && text.endsWith(quote)) {
     text = text.slice(1, -1).trim();
   }
-  if (text.toLowerCase().startsWith("file:///")) text = text.slice(8);
-  else if (text.toLowerCase().startsWith("file://")) text = text.slice(7);
+  const lower = text.toLowerCase();
+  if (lower.startsWith("file:///")) text = text.slice(8);
+  else if (lower.startsWith("file://")) text = text.slice(7);
   return text;
+}
+
+/** Resolve a path that must already exist as a regular file. */
+function existingFile(raw: unknown): string {
+  const resolved = path.resolve(String(raw ?? "").trim());
+  try {
+    const real = fs.realpathSync(resolved);
+    if (fs.statSync(real).isFile()) return real;
+  } catch {
+    // fall through to the readable error below
+  }
+  throw new Error(`No file exists at:\n${resolved}`);
 }
 
 function resolveVideo(raw: string): string {
@@ -122,9 +136,19 @@ function runtimePath(): string {
   return process.execPath;
 }
 
+/**
+ * Windows ships taskkill in System32. Use that absolute path instead of letting
+ * PATH decide which executable runs; the bare name stays as a last resort.
+ */
+function taskkillPath(): string {
+  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const absolute = path.join(root, "System32", "taskkill.exe");
+  return fs.existsSync(absolute) ? absolute : "taskkill";
+}
+
 function killTree(child: ChildProcessWithoutNullStreams): void {
   if (process.platform === "win32" && child.pid) {
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+    spawn(taskkillPath(), ["/pid", String(child.pid), "/T", "/F"], {
       windowsHide: true,
       stdio: "ignore",
     }).unref();
@@ -228,11 +252,8 @@ function runRecovery(request: RecoveryRequest): Promise<RecoveryResult> {
         return;
       }
       const detail = stderr.trim();
-      finish(
-        new Error(
-          `Recovery failed (exit ${code ?? "?"}).${detail ? `\n\n${detail}` : ""}`
-        )
-      );
+      const suffix = detail ? `\n\n${detail}` : "";
+      finish(new Error(`Recovery failed (exit ${code ?? "?"}).${suffix}`));
     });
 
     mainWindow?.webContents.send(
@@ -323,11 +344,13 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("shell:open-path", (_event, target: string): Promise<string> => {
-    return shell.openPath(String(target ?? ""));
+    // Validate first: IPC input must resolve to a real regular file, and the
+    // path is handed to Electron as data, never interpolated into a shell.
+    return shell.openPath(existingFile(target));
   });
 
   ipcMain.handle("shell:show-in-folder", (_event, target: string): void => {
-    if (target) shell.showItemInFolder(String(target));
+    if (target) shell.showItemInFolder(existingFile(target));
   });
 
   createWindow();

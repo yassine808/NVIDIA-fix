@@ -6,17 +6,19 @@ the prefix against its predicted source position. Reports:
   * the container-time -> content-time mapping
   * what the unmatched blocks look like (AVCC vs high-entropy garbage)
 
-Usage: python forensics/duplication_dense.py
+Usage: python forensics/duplication_dense.py [video] [end_mb]
 """
 from __future__ import annotations
 
 import json
 import math
 import os
+import sys
 
 from bitstream_map import load_tracks
 
-VIDEO = r"recovery/Arc_Raiders corrupted.mp4"
+VIDEO = sys.argv[1] if len(sys.argv) > 1 else r"recovery/Arc_Raiders corrupted.mp4"
+END_MB = int(sys.argv[2]) if len(sys.argv) > 2 else 190
 BLOCK = 256 << 10
 NEEDLE = 64
 SEARCH = 512 << 10
@@ -33,42 +35,37 @@ def entropy(b: bytes) -> float:
     return -sum((c / n) * math.log2(c / n) for c in cnt if c)
 
 
-def main() -> int:
-    size = os.path.getsize(VIDEO)
-    data = open(VIDEO, "rb").read()
-    tracks, top, _s = load_tracks(VIDEO)
-    vtr = next(t for t in tracks if t.get("handler") == "vide")
-    intervals = vtr["intervals"]
-    timescale = vtr.get("timescale") or 1
+def sample_times(stts):
     ts, t = [], 0
-    for cnt, d in vtr["stts"]:
+    for cnt, d in stts:
         for _ in range(cnt):
             ts.append(t)
             t += d
+    return ts
 
-    starts = [iv[0] for iv in intervals]
 
-    def sample_time(off):
-        lo, hi = 0, len(starts) - 1
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if starts[mid] < off:
-                lo = mid + 1
-            else:
-                hi = mid
-        si = intervals[lo][2]
-        return round(ts[si] / timescale, 2) if si < len(ts) else None
+def sample_time(starts, intervals, ts, timescale, off):
+    lo, hi = 0, len(starts) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if starts[mid] < off:
+            lo = mid + 1
+        else:
+            hi = mid
+    si = intervals[lo][2]
+    return round(ts[si] / timescale, 2) if si < len(ts) else None
 
-    # --- calibrate the drift line on confident matches -------------------
+
+def calibrate(data: bytes, size: int):
+    """Fit src = a + b*off on confident prefix->tail matches; None if too few."""
     calib = []
     for poff in range(1 << 20, 175 << 20, 1 << 20):
         needle = data[poff:poff + NEEDLE]
-        j = data.find(needle, 300 << 20)
+        j = data.find(needle, int(size * 0.6))
         if j > poff:
             calib.append((poff, j - poff))
     if len(calib) < 4:
-        print("calibration failed")
-        return 1
+        return None
     n = len(calib)
     mx = sum(x for x, _ in calib) / n
     my = sum(y for _, y in calib) / n
@@ -79,10 +76,13 @@ def main() -> int:
     print("drift line: src = %.1f + %.7f*off   residual median %d, p95 %d"
           % (a, b, resid[n // 2], resid[int(n * 0.95)]))
     print("calibration points %d" % n)
+    return a, b
 
-    # --- dense validation ------------------------------------------------
+
+def validate_blocks(data: bytes, size: int, end_mb: int, a: float, b: float, time_of):
+    """Validate every BLOCK of the prefix against the predicted source offset."""
     rows = []
-    for poff in range(0, 190 << 20, BLOCK):
+    for poff in range(0, end_mb << 20, BLOCK):
         needle = data[poff:poff + NEEDLE]
         if len(needle) < NEEDLE:
             break
@@ -91,15 +91,18 @@ def main() -> int:
         j = data.find(needle, lo, min(size, predicted + SEARCH + NEEDLE))
         if j < 0:
             probe = data[poff:poff + RUN]
-            rows.append({"off": poff, "t": sample_time(poff), "matched": False,
+            rows.append({"off": poff, "t": time_of(poff), "matched": False,
                          "src": None, "src_t": None,
                          "entropy": round(entropy(probe), 2)})
             continue
         run = next((i for i in range(RUN) if data[poff + i] != data[j + i]), RUN)
-        rows.append({"off": poff, "t": sample_time(poff), "matched": True,
-                     "src": j, "src_t": sample_time(j),
+        rows.append({"off": poff, "t": time_of(poff), "matched": True,
+                     "src": j, "src_t": time_of(j),
                      "run": run, "entropy": round(entropy(data[poff:poff + RUN]), 2)})
+    return rows
 
+
+def print_summary(rows) -> None:
     matched = [r for r in rows if r["matched"]]
     unmatched = [r for r in rows if not r["matched"]]
     print("blocks %d  matched %d (%.1f%%)  unmatched %d"
@@ -138,8 +141,33 @@ def main() -> int:
         last = max(matched, key=lambda r: r["off"])
         print("\nlast matched prefix block at off %d (container t=%ss, content t=%ss)"
               % (last["off"], last["t"], last["src_t"]))
-    json.dump({"line": {"a": a, "b": b}, "rows": rows},
-              open("recovery/duplication_dense.json", "w"), indent=1)
+
+
+def main() -> int:
+    size = os.path.getsize(VIDEO)
+    data = open(VIDEO, "rb").read()
+    tracks, _top, _s = load_tracks(VIDEO)
+    vtr = next(t for t in tracks if t.get("handler") == "vide")
+    intervals = vtr["intervals"]
+    timescale = vtr.get("timescale") or 1
+    ts = sample_times(vtr["stts"])
+    starts = [iv[0] for iv in intervals]
+
+    # --- calibrate the drift line on confident matches -------------------
+    fit = calibrate(data, size)
+    if fit is None:
+        print("calibration failed")
+        return 1
+    a, b = fit
+
+    # --- dense validation ------------------------------------------------
+    time_of = lambda off: sample_time(starts, intervals, ts, timescale, off)
+    rows = validate_blocks(data, size, END_MB, a, b, time_of)
+    print_summary(rows)
+
+    target = os.path.join(os.path.dirname(VIDEO), "duplication_dense.json")
+    json.dump({"line": {"a": a, "b": b}, "rows": rows}, open(target, "w"), indent=1)
+    print("wrote", target)
     return 0
 
 

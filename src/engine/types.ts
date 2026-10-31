@@ -19,6 +19,16 @@ export const CAVEAT =
   "overwritten in place by the recorder and cannot be reconstructed from this " +
   "file. Audio before clean_start is exported separately.";
 
+/** The caveat with the measured boundary filled in, for reports and the UI. */
+export function caveatFor(cleanStartSeconds: number): string {
+  const at = `${cleanStartSeconds.toFixed(2)} s`;
+  return (
+    `Only the footage from ${at} onward is recoverable. The first ${at} was ` +
+    "overwritten in place by the recorder and cannot be reconstructed from this " +
+    `file. Its audio up to ${at} is exported separately.`
+  );
+}
+
 export const FULL_LENGTH_CAVEAT =
   "This is a rebuild, not the original recording. The opening shows footage the " +
   "recorder wrote over the head - real frames from later in the same session - " +

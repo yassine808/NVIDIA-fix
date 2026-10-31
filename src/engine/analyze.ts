@@ -10,6 +10,7 @@ import {
   Analysis,
   CANDIDATE_RUN,
   CAVEAT,
+  caveatFor,
   Json,
   MIN_RUN,
   Sample,
@@ -122,7 +123,7 @@ export function analysisToDict(analysis: Analysis): Json {
       flags: candidate.flags,
       nal_type: candidate.nalType,
     })),
-    warning: isHealthy(analysis) ? null : analysis.warning,
+    warning: isHealthy(analysis) ? null : caveatFor(boundary ? boundary.pts : 0),
   };
 }
 
@@ -140,19 +141,13 @@ export async function analyze(input: string): Promise<Analysis> {
   const suffix = path.extname(source).toLowerCase();
   if (!SUPPORTED_SUFFIXES.has(suffix)) {
     throw new UnsupportedMediaError(
-      `Unsupported file extension: ${suffix || "(none)"}. Supported: ${[...SUPPORTED_SUFFIXES].sort().join(", ")}`
+      `Unsupported file extension: ${suffix || "(none)"}. Supported: ${[...SUPPORTED_SUFFIXES].sort((a, b) => a.localeCompare(b)).join(", ")}`
     );
   }
 
   const media = await probeMedia(source);
   const samples = await probePackets(source);
-
-  const fd = fs.openSync(source, "r");
-  try {
-    for (const sample of samples) checkSample(fd, sample);
-  } finally {
-    fs.closeSync(fd);
-  }
+  openSamples(source, samples);
 
   const bad = samples.filter((sample) => !sample.valid);
   if (bad.length === 0) {
@@ -169,25 +164,11 @@ export async function analyze(input: string): Promise<Analysis> {
     };
   }
 
-  const lastBad = bad[bad.length - 1];
-  const candidates: Sample[] = [];
-  let cleanRun = 0;
-  for (let i = lastBad.index + 1; i < samples.length; i += 1) {
-    const sample = samples[i];
-    if (!(sample.valid && (sample.flags.includes("K") || sample.nalType === 5))) continue;
-    const run = samples.slice(i, i + CANDIDATE_RUN);
-    const need = Math.min(MIN_RUN, samples.length - i);
-    if (need >= 5 && run.length >= need && run.slice(0, need).every((item) => item.valid)) {
-      candidates.push(sample);
-      if (cleanRun === 0) {
-        for (const item of run) {
-          if (!item.valid) break;
-          cleanRun += 1;
-        }
-      }
-      if (candidates.length >= 20) break;
-    }
+  const lastBad = bad.at(-1);
+  if (!lastBad) {
+    throw new NvidiaFixError("No damaged sample was found while scanning the file.");
   }
+  const { candidates, cleanRun } = findBoundaryCandidates(samples, lastBad.index + 1);
 
   return {
     path: source,
@@ -200,4 +181,50 @@ export async function analyze(input: string): Promise<Analysis> {
     cleanRun,
     warning: CAVEAT,
   };
+}
+
+function openSamples(source: string, samples: Sample[]): void {
+  const fd = fs.openSync(source, "r");
+  try {
+    for (const sample of samples) checkSample(fd, sample);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function isCandidateStart(sample: Sample): boolean {
+  return sample.valid && (sample.flags.includes("K") || sample.nalType === 5);
+}
+
+/** True when the next MIN_RUN samples (up to CANDIDATE_RUN) are all valid. */
+function hasCleanRun(samples: Sample[], start: number): boolean {
+  const run = samples.slice(start, start + CANDIDATE_RUN);
+  const need = Math.min(MIN_RUN, samples.length - start);
+  return need >= 5 && run.length >= need && run.slice(0, need).every((item) => item.valid);
+}
+
+function countCleanRun(samples: Sample[], start: number): number {
+  const run = samples.slice(start, start + CANDIDATE_RUN);
+  let cleanRun = 0;
+  for (const item of run) {
+    if (!item.valid) break;
+    cleanRun += 1;
+  }
+  return cleanRun;
+}
+
+function findBoundaryCandidates(
+  samples: Sample[],
+  start: number
+): { candidates: Sample[]; cleanRun: number } {
+  const candidates: Sample[] = [];
+  let cleanRun = 0;
+  for (let i = start; i < samples.length; i += 1) {
+    const sample = samples[i];
+    if (!isCandidateStart(sample) || !hasCleanRun(samples, i)) continue;
+    candidates.push(sample);
+    if (cleanRun === 0) cleanRun = countCleanRun(samples, i);
+    if (candidates.length >= 20) break;
+  }
+  return { candidates, cleanRun };
 }

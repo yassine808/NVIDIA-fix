@@ -20,7 +20,17 @@
 - [x] Retire the legacy Python UIs; flatten the Electron app to the repo root.
 - [x] Port the recovery engine from Python to TypeScript; delete `nvidia_fix.py`
       and `scripts/bridge.py`.
-- [ ] 100% of the *original* opening: impossible from every local source.
+- [x] Bundle ffmpeg with the app: `scripts/fetch-ffmpeg.js`, `npm run
+      fetch-ffmpeg`, staged by `npm run dist`, preferred over `PATH`.
+- [x] README screenshots from the real window + a repo description that says
+      what the app does.
+- [x] Valorant 2026.04.05: ship the clean tail and the full-length rebuild
+      generated from `video test/duplication_dense.json`.
+- [ ] 100% of the *original* opening: impossible from every local source
+      (Valorant confirms it: the head is a shifted copy of ~192-300 s).
+- [x] Give the CI jobs plain names (no `1 /` prefixes).
+- [x] Clear all 103 SonarCloud issues (forensics Python, renderer, smoke
+      harness, TypeScript engine/main/cli).
 
 ## Environment rules
 
@@ -28,6 +38,109 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — SonarCloud cleanup (103 issues) + plain CI job names
+
+- Goal: clear every issue SonarCloud reports for `yassine808/NVIDIA-fix` (49 in
+  `forensics/` + `scripts/make_icon.py`, 24 in TypeScript, 22 in
+  `src/renderer/index.html` + `scripts/smoke-ui.js`), drop the "Desktop app
+  built with Electron." line from the repo description, and give the CI jobs
+  plain names instead of "1 / ...", "2 / ...".
+- Done: repo description shortened with `gh repo edit`; CI job names renamed to
+  "Quality and docs", "Engine tests", "Desktop app", "CLI recovery". Python:
+  unused locals/params, real bug at `mp4_probe` report print (extra format
+  argument, the crash seen earlier), empty block, cognitive-complexity splits.
+  TypeScript: unused import, optional chaining, `replaceAll`/`String.raw`,
+  parameter object for `fullLengthBlock`, re-exports, `startsWith`, `.at()`,
+  `??`, `localeCompare` sort, nested template literal, command-injection sink.
+  Renderer: CSP without `unsafe-inline` (CSS/JS moved out of `index.html`),
+  labels on every input, `Number.isNaN`, de-nested ternaries, handled catches.
+  Smoke harness: absolute `taskkill`, awaited IIFE, split poll loops.
+- Verified: `python -m compileall -q tests scripts forensics`, `npm run build`,
+  `npm test`, `npm run smoke`, `python scripts/ci_e2e.py`, and
+  `python forensics/mp4_probe.py <video>` on the real recording.
+- Next: nothing in flight.
+
+### 2026-10-31 — ffmpeg bundled, README screenshots, repo description
+
+- Goal: the app must not depend on the user's PATH for ffmpeg, the README must
+  show what the app looks like, and the repo's public description must say what
+  it does.
+- Done: new `scripts/fetch-ffmpeg.js` downloads the newest gyan.dev essentials
+  build into `recovery/tools/ff/ffmpeg-<ver>-essentials_build/bin/` (skips when
+  present, `--force` refreshes, keeps only `ffmpeg.exe` + `ffprobe.exe`).
+  `npm run fetch-ffmpeg` added; `npm run dist` now fetches first, and
+  `scripts/stage-engine.js` stages only the newest build. `src/engine/tools.ts`
+  now prefers the bundled binaries over `PATH` and the missing-tool error points
+  at the fetch script. Renderer/report caveat no longer leaks the literal
+  `clean_start` placeholder (`caveatFor()` in `types.ts`). README: new hero
+  screenshot + result screenshot (`docs/screenshots/home.png`, `result.png`,
+  captured from the real window through `npm run smoke -- --shot`), an "ffmpeg
+  ships with the app" section, and an updated packaging note. GitHub repo
+  description + topics set with `gh repo edit`. The description no longer says
+  "+ CLI" (there is a CLI only from a source checkout, via `npm run engine --`,
+  not a shipped command); the README section is now titled "CLI (from a source
+  checkout)" and says so.
+- Verified: `node scripts/fetch-ffmpeg.js` reports the existing build, `npm run
+  build` clean, the engine resolves `recovery\tools\ff\...\ffmpeg.exe`, and the
+  smoke run passed on the fixture while writing both screenshots.
+- Next: rebuild the Valorant deliverables with the duplication map now present.
+
+### 2026-10-31 — Valorant 2026.04.05 DVR: the opening is a shifted copy of the tail
+
+- Goal: the user's new recording `video test/Valorant 2026.04.05 -
+  23.27.11.02.DVR.mp4` must be recovered "100%"; he can see the first frames.
+- Done: `video test/` is already ignored and committed (`e3ee443`); the copy is
+  byte-identical to `D:\Videos\VALORANT\Valorant 2026.04.05 - 23.27.11.02.DVR.mp4`
+  (SHA-256 `32C90D62…`, 665,137,344 B), so there is no second local source.
+  Structure is intact: `ftyp`, one `mdat` (664,555,945 B), `moov` at the end;
+  video track 36,000 samples / 300.0 s / 1200 sync frames, audio 14,062 samples,
+  0 overlapping or out-of-mdat samples.
+  Payload test: every one of the first 13,200 video samples has its 4-byte AVCC
+  length exactly equal to `stsz`, but only 2,472 (18.7%) start with a legal NAL
+  header — the same rate random bytes would give. So framing is intact and the
+  bytes inside the samples are shifted.
+  Duplication scan (`recovery/dup_scan.py`, 512-byte blocks on a 2 MiB grid):
+  **105 of 118 blocks from the first 232 MB reappear at +432,170,000 B
+  (range 432,130,168-432,233,574, i.e. a drift of 103,406 B)**. In time that
+  destination is ~194.9-195.0 s. The file is therefore `[A][B][A]` with
+  A = 232 MB: file 0-105 s is a byte-shifted copy of file ~195-300 s.
+  Visual test: frames at 1-8 s decode to smeared/rotated stills of the *same*
+  gameplay that sits at ~195 s (they show the party UI and ability timers), then
+  go black; ffmpeg logs "Frame num change", "missing picture in access unit".
+- Verified: hashes, `forensics/mp4_probe.py` output (`recovery/valorant-probe.json`),
+  `recovery/head_check.py` (length/NAL counts), `recovery/dup_scan.py` (105/118
+  hits), thumbnails in `recovery/shots/valorant/`.
+- Next: build the deliverable with the engine (`fix --full-length`) and verify a
+  full decode; then state the honest verdict: the original 0-110.25 s gameplay
+  is destroyed, the head can only be refilled with the duplicated tail.
+
+### 2026-10-31 — Valorant 2026.04.05 DVR: deliverables built and verified
+
+- Goal: hand over a recovered file instead of a diagnosis.
+- Done: `forensics/duplication_dense.py` now takes the video path and an end
+  bound and writes `duplication_dense.json` beside that video (it used to be
+  hardcoded to the Arc Raiders file). Dense map for Valorant: drift line
+  `src = 432137759 + 0.0004038*off`, 872/1000 probe blocks matched, container
+  0.09 s -> content 192.26 s and container 103.53 s -> content 299.91 s, so
+  101.79 s of the 110.25 s damaged opening is provably a copy and 8.33 s is
+  garbage. Ran `fix --full-length`; outputs live beside the input in `video
+  test/`: `.clean.mp4` (189.7487 s, 22,770 packets, 0 decode errors),
+  `.clean.audio.m4a` (110.27 s), `.clean.full-length.mp4` (297.411 s, 35,689
+  frames, original audio 297.40 s, 0 decode errors), `.clean.report.json`.
+- Verified: full decode of every output returned 0 decoder errors (only benign
+  non-monotonic-DTS muxer warnings). Frames pulled from the rebuild at 1, 30,
+  60, 100, 109, 111, 150 and 290 s are clean 1920x1080 Valorant gameplay — the
+  rebuilt opening is real footage, not smeared garbage, and the join at 107.65 s
+  is seamless. `npm test` 16/16.
+- Honest statement: the rebuild is 297.41 s, not 300 s, because the recorder's
+  copy window ends at content 299.91 s; only 107.65 s of duplicated footage
+  exists to refill a 110.25 s hole (`shortfall_seconds: 2.599533` in the
+  report). The original 0-110.25 s gameplay does not exist anywhere on this
+  machine.
+- Next: nothing in flight. If the user wants an exact 300 s file, the only
+  honest option is to fill the last 2.6 s with real tail footage (content
+  189.75-192.26 s), which would be a product decision, not a recovery.
 
 ### 2026-10-31 — recovery engine ported to TypeScript; Python app removed
 

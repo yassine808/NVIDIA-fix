@@ -19,6 +19,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 import mp4_probe as P
+from paths import readable_file
 
 AVC_NAL_OK = {1, 5, 6, 7, 8, 9, 10, 11, 12, 13}
 
@@ -96,120 +97,114 @@ def score_shift(r: Reader, intervals: List[Tuple[int, int, int]], delta: int,
             "exact": round(exact / max(tested, 1), 4)}
 
 
+def scan_gap(r: Reader, gstart: int, gend: int,
+             budget_nals: int) -> Dict[str, object]:
+    """Walk one undescribed region as a continuous AVCC stream."""
+    blob = r.read(gstart, gend - gstart)
+    p = 0
+    n = 0
+    types: Dict[int, int] = {}
+    first_nal_offsets = []
+    while p + 4 <= len(blob) and n < budget_nals:
+        ln = struct.unpack_from(">I", blob, p)[0]
+        if ln <= 0 or p + 4 + ln > len(blob):
+            break
+        typ = blob[p + 4] & 0x1F
+        if typ not in AVC_NAL_OK:
+            break
+        types[typ] = types.get(typ, 0) + 1
+        if len(first_nal_offsets) < 5:
+            first_nal_offsets.append(gstart + p)
+        p += 4 + ln
+        n += 1
+    return {"start": gstart, "end": gend, "bytes": gend - gstart,
+            "nals_parsed": n, "consumed": p,
+            "coverage_pct": round(100.0 * p / (gend - gstart), 2),
+            "nal_types": {str(k): v for k, v in sorted(types.items())},
+            "first_nals": first_nal_offsets}
+
+
 def orphan_scan(r: Reader, gaps: List[Tuple[int, int]], budget_nals: int = 2_000_000):
     """Walk each undescribed region as a continuous AVCC stream."""
     out = []
     for gstart, gend in sorted(gaps, key=lambda g: -(g[1] - g[0]))[:6]:
         if gend - gstart < 1 << 20:
             continue
-        blob = r.read(gstart, gend - gstart)
-        p = 0
-        n = 0
-        types: Dict[int, int] = {}
-        first_nal_offsets = []
-        while p + 4 <= len(blob) and n < budget_nals:
-            ln = struct.unpack_from(">I", blob, p)[0]
-            if ln <= 0 or p + 4 + ln > len(blob):
-                break
-            typ = blob[p + 4] & 0x1F
-            if typ not in AVC_NAL_OK:
-                break
-            types[typ] = types.get(typ, 0) + 1
-            if len(first_nal_offsets) < 5:
-                first_nal_offsets.append(gstart + p)
-            p += 4 + ln
-            n += 1
-        out.append({"start": gstart, "end": gend, "bytes": gend - gstart,
-                    "nals_parsed": n, "consumed": p,
-                    "coverage_pct": round(100.0 * p / (gend - gstart), 2),
-                    "nal_types": {str(k): v for k, v in sorted(types.items())},
-                    "first_nals": first_nal_offsets})
-        if n:
+        rec = scan_gap(r, gstart, gend, budget_nals)
+        out.append(rec)
+        if rec["nals_parsed"]:
             break
     return out
 
 
-def main() -> int:
-    video = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") \
-        else r"recovery/Arc_Raiders corrupted.mp4"
-    out_json = None
-    if "--json" in sys.argv:
-        out_json = sys.argv[sys.argv.index("--json") + 1]
+def read_top_level(fh, size: int):
+    """Walk box headers from the file start; return (boxes, moov payload range)."""
+    pos, moov_range, top = 0, None, []
+    while pos + 8 <= size:
+        fh.seek(pos)
+        hdr = fh.read(16)
+        sz = struct.unpack(">I", hdr[:4])[0]
+        bt = hdr[4:8]
+        hdrlen = 8
+        if sz == 1:
+            sz = struct.unpack(">Q", hdr[8:16])[0]
+            hdrlen = 16
+        elif sz == 0:
+            sz = size - pos
+        top.append({"type": bt.decode("latin-1"), "start": pos, "size": sz})
+        if bt == b"moov":
+            moov_range = (pos + hdrlen, pos + sz)
+        pos += sz
+    return top, moov_range
 
+
+def load_moov(video: str):
     with open(video, "rb") as fh:
         fh.seek(0)
         size = os.path.getsize(video)
-        pos, moov_range, top = 0, None, []
-        while pos + 8 <= size:
-            fh.seek(pos)
-            hdr = fh.read(16)
-            sz = struct.unpack(">I", hdr[:4])[0]
-            bt = hdr[4:8]
-            hdrlen = 8
-            if sz == 1:
-                sz = struct.unpack(">Q", hdr[8:16])[0]
-                hdrlen = 16
-            elif sz == 0:
-                sz = size - pos
-            top.append({"type": bt.decode("latin-1"), "start": pos, "size": sz})
-            if bt == b"moov":
-                moov_range = (pos + hdrlen, pos + sz)
-            pos += sz
+        top, moov_range = read_top_level(fh, size)
         fh.seek(moov_range[0])
         moov = fh.read(moov_range[1] - moov_range[0])
+    return size, top, moov
 
-    tracks = []
-    for bt, ps, pe, _bs, _bad in P.boxes(moov, 0, len(moov)):
-        if bt == b"trak":
-            tracks.append(P.parse_track(moov, ps, pe, size))
-    vtr = next(t for t in tracks if t.get("handler") == "vide")
-    atr = next((t for t in tracks if t.get("handler") == "soun"), None)
-    intervals = vtr["intervals"]
 
-    r = Reader(video)
-    report: Dict[str, object] = {"video": video, "file_size": size,
-                                 "top_level": top,
-                                 "video_samples": len(intervals)}
-    print("shift test ...", file=sys.stderr)
-    report["shift_test"] = [score_shift(r, intervals, d) for d in (0, 8, -32, 32, 24, -8)]
-    print(json.dumps(report["shift_test"]), file=sys.stderr)
-    best = max(report["shift_test"], key=lambda s: (s["exact"], s["parses"]))
-    delta = int(best["delta"])
-    report["best_delta"] = delta
+def build_tracks(moov: bytes) -> List[Dict[str, object]]:
+    return [P.parse_track(moov, ps, pe)
+            for bt, ps, pe, _bs, _bad in P.boxes(moov, 0, len(moov))
+            if bt == b"trak"]
 
-    # timestamps
-    stts = vtr.get("stts") or []
+
+def sample_times(stts: List[Tuple[int, int]]) -> List[int]:
     ts_of: List[int] = []
     t = 0
     for cnt, d in stts:
         for _ in range(cnt):
             ts_of.append(t)
             t += d
-    report["ts_count"] = len(ts_of)
-    timescale = vtr.get("timescale") or 1
+    return ts_of
 
-    print("hashing %d samples ..." % len(intervals), file=sys.stderr)
+
+def hash_samples(r: Reader, intervals: List[Tuple[int, int, int]], delta: int,
+                 ts_of: List[int], timescale: int) -> List[Dict[str, object]]:
     recs = []
     for off, sz, si in intervals:
         blob = r.read(off + delta, sz)
         h = hashlib.sha1(blob).hexdigest()[:16]
         recs.append({"i": si, "off": off + delta, "size": sz, "sha": h,
                      "ts": ts_of[si] / timescale if si < len(ts_of) else None})
-    report["samples"] = recs
+    return recs
 
+
+def duplicate_groups(recs: List[Dict[str, object]]):
     by_hash: Dict[str, List[int]] = {}
     for rec in recs:
         by_hash.setdefault(rec["sha"], []).append(rec["i"])
     dup_clusters = {h: v for h, v in by_hash.items() if len(v) > 1}
-    report["unique_payloads"] = len(by_hash)
-    report["dup_clusters"] = len(dup_clusters)
-    report["dup_samples"] = sum(len(v) - 1 for v in dup_clusters.values())
-    report["unique_bytes"] = sum(recs[v[0]]["size"] for v in by_hash.values())
-    print("unique payloads %d / %d, duplicated samples %d, unique bytes %d"
-          % (len(by_hash), len(recs), report["dup_samples"],
-             report["unique_bytes"]), file=sys.stderr)
+    return by_hash, dup_clusters
 
-    # time -> source mapping for duplicated samples (the README's drift table)
+
+def build_drift(dup_clusters: Dict[str, List[int]], recs: List[Dict[str, object]]):
+    """Time -> source mapping for duplicated samples (the README's drift table)."""
     dup_by_index = {}
     for h, idxs in dup_clusters.items():
         for i in idxs[1:]:
@@ -221,12 +216,12 @@ def main() -> int:
             mapping.append({"sample": i, "ts": round(recs[i]["ts"], 3),
                             "source_sample": src,
                             "source_ts": round(recs[src]["ts"], 3)})
-    report["drift_sample"] = mapping[:200]
-    report["duplicated_sample_count"] = len(dup_by_index)
+    return mapping, dup_by_index
 
-    # which byte ranges hold unique payloads / which are orphaned
-    mdat = next(b for b in top if b["type"] == "mdat")
-    mstart, mend = mdat["start"] + 8, mdat["start"] + mdat["size"]
+
+def find_gaps(recs: List[Dict[str, object]], mstart: int,
+              mend: int) -> List[List[int]]:
+    """Byte ranges of mdat not covered by any indexed sample."""
     iv = sorted((rec["off"], rec["size"]) for rec in recs)
     gaps, cur = [], mstart
     for off, sz in iv:
@@ -235,7 +230,62 @@ def main() -> int:
         cur = max(cur, off + sz)
     if cur < mend:
         gaps.append([cur, mend])
-    gaps = [g for g in gaps if g[1] - g[0] > 1024]
+    return [g for g in gaps if g[1] - g[0] > 1024]
+
+
+def main() -> int:
+    video = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") \
+        else r"recovery/Arc_Raiders corrupted.mp4"
+    out_json = None
+    if "--json" in sys.argv:
+        out_json = sys.argv[sys.argv.index("--json") + 1]
+    # The operator names an explicit local file on the command line; resolve it
+    # once so every read below uses the validated path.
+    resolved = readable_file(video, "video")
+    out_target = os.path.realpath(out_json) if out_json else None
+
+    size, top, moov = load_moov(resolved)
+    tracks = build_tracks(moov)
+    vtr = next(t for t in tracks if t.get("handler") == "vide")
+    intervals = vtr["intervals"]
+
+    r = Reader(resolved)
+    report: Dict[str, object] = {"video": video, "file_size": size,
+                                 "top_level": top,
+                                 "video_samples": len(intervals)}
+    print("shift test ...", file=sys.stderr)
+    report["shift_test"] = [score_shift(r, intervals, d) for d in (0, 8, -32, 32, 24, -8)]
+    print(json.dumps(report["shift_test"]), file=sys.stderr)
+    best = max(report["shift_test"], key=lambda s: (s["exact"], s["parses"]))
+    delta = int(best["delta"])
+    report["best_delta"] = delta
+
+    # timestamps
+    ts_of = sample_times(vtr.get("stts") or [])
+    report["ts_count"] = len(ts_of)
+    timescale = vtr.get("timescale") or 1
+
+    print("hashing %d samples ..." % len(intervals), file=sys.stderr)
+    recs = hash_samples(r, intervals, delta, ts_of, timescale)
+    report["samples"] = recs
+
+    by_hash, dup_clusters = duplicate_groups(recs)
+    report["unique_payloads"] = len(by_hash)
+    report["dup_clusters"] = len(dup_clusters)
+    report["dup_samples"] = sum(len(v) - 1 for v in dup_clusters.values())
+    report["unique_bytes"] = sum(recs[v[0]]["size"] for v in by_hash.values())
+    print("unique payloads %d / %d, duplicated samples %d, unique bytes %d"
+          % (len(by_hash), len(recs), report["dup_samples"],
+             report["unique_bytes"]), file=sys.stderr)
+
+    mapping, dup_by_index = build_drift(dup_clusters, recs)
+    report["drift_sample"] = mapping[:200]
+    report["duplicated_sample_count"] = len(dup_by_index)
+
+    # which byte ranges hold unique payloads / which are orphaned
+    mdat = next(b for b in top if b["type"] == "mdat")
+    mstart, mend = mdat["start"] + 8, mdat["start"] + mdat["size"]
+    gaps = find_gaps(recs, mstart, mend)
     report["gaps"] = gaps
     print("gaps: %d, largest %s" % (len(gaps), max((b - a for a, b in gaps), default=0)),
           file=sys.stderr)
@@ -245,10 +295,8 @@ def main() -> int:
     print(json.dumps(report["orphan_scan"], indent=1), file=sys.stderr)
 
     r.close()
-    for key in ("samples", "drift_sample"):
-        pass
-    if out_json:
-        with open(out_json, "w", encoding="utf-8") as fh:
+    if out_target:
+        with open(out_target, "w", encoding="utf-8") as fh:
             json.dump(report, fh, default=str)
         print("wrote", out_json, file=sys.stderr)
     return 0

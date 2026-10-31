@@ -53,14 +53,14 @@ function printAnalysis(analysis: Awaited<ReturnType<typeof analyze>>): void {
 
 function printExplain(result: Json): void {
   if (result.status === "healthy") {
-    console.log(String(result.verdict));
+    console.log(text(result.verdict));
     return;
   }
   const verdict = result.duplication as Json;
   const timeline = result.timeline as Json;
   const first = verdict.first_match as number[] | null;
   const last = verdict.last_match as number[] | null;
-  console.log(`Input          : ${result.input}`);
+  console.log(`Input          : ${text(result.input)}`);
   console.log(`Damaged prefix : ${Number(verdict.damaged_seconds).toFixed(3)} s`);
   console.log(
     `  copied later : ${Number(verdict.duplicated_seconds).toFixed(3)} s ` +
@@ -82,6 +82,92 @@ function printExplain(result: Json): void {
   console.log(`Verdict        : ${result.verdict}`);
 }
 
+/** Render any JSON value without ever printing "[object Object]". */
+function text(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? String(value) : encoded;
+}
+
+function printFixResult(result: Json, fullLengthRequested: boolean): void {
+  if (result.status === "healthy") {
+    console.log(text(result.message));
+    return;
+  }
+  const paths = result.paths as Json;
+  console.log(`Clean tail   : ${text(paths.video)}`);
+  if (paths.audio) console.log(`Early audio  : ${text(paths.audio)}`);
+  if (paths.full_length) {
+    const full = (result.full_length ?? {}) as Json;
+    console.log(`Full-length  : ${text(paths.full_length)}`);
+    console.log(
+      `               ${Number(full.video_duration_seconds ?? 0).toFixed(3)} s, ` +
+        `${text(full.video_frames ?? 0)} frames; first ` +
+        `${Number(full.filled_seconds ?? 0).toFixed(3)} s repeats footage from ` +
+        `${Number(full.timeline_start_seconds ?? 0).toFixed(3)}–` +
+        `${Number(full.timeline_end_seconds ?? 0).toFixed(3)} s (not the original opening)`
+    );
+  } else if (fullLengthRequested) {
+    const block = (result.full_length ?? {}) as Json;
+    console.log(`Full-length  : not built (${text(block.skipped ?? block.error ?? "not built")})`);
+  }
+  console.log(`Report       : ${text(paths.report)}`);
+  console.log(`Status       : ${text(result.status)}`);
+  const recovery = result.recovery as Json;
+  const video = recovery.video as Json;
+  console.log(`Decode errors: ${text(video.decode_errors)}`);
+  const warnings = Number(recovery.muxer_warnings ?? 0);
+  if (warnings > 0) {
+    console.log(`Muxer warning: ${warnings} timestamp warning(s) (not file damage)`);
+  }
+}
+
+function findInput(args: string[]): string | undefined {
+  const withValue = new Set(["--out", "--map"]);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (withValue.has(arg)) {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    return arg;
+  }
+  return undefined;
+}
+
+async function runAnalyze(input: string | undefined, rest: string[]): Promise<number> {
+  if (!input) throw new NvidiaFixError("analyze needs an input file.");
+  const analysis = await analyze(input);
+  if (rest.includes("--json")) console.log(JSON.stringify(analysisToDict(analysis), null, 2));
+  else printAnalysis(analysis);
+  return 0;
+}
+
+async function runFix(input: string | undefined, rest: string[]): Promise<number> {
+  if (!input) throw new NvidiaFixError("fix needs an input file.");
+  const result = await recover(input, {
+    outDir: value(rest, "--out") ?? null,
+    fullDecode: !rest.includes("--no-full-decode"),
+    fullLength: rest.includes("--full-length"),
+  });
+  if (rest.includes("--json")) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    printFixResult(result, rest.includes("--full-length"));
+  }
+  return 0;
+}
+
+async function runExplain(input: string | undefined, rest: string[]): Promise<number> {
+  if (!input) throw new NvidiaFixError("explain needs an input file.");
+  const result = await explain(input, value(rest, "--map") ?? null);
+  if (rest.includes("--json")) console.log(JSON.stringify(result, null, 2));
+  else printExplain(result);
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   if (argv.includes("--version")) {
     console.log(`${TOOL} ${VERSION}`);
@@ -89,18 +175,7 @@ async function main(argv: string[]): Promise<number> {
   }
   const command = argv[0];
   const rest = argv.slice(1);
-  const withValue = new Set(["--out", "--map"]);
-  let input: string | undefined;
-  for (let i = 0; i < rest.length; i += 1) {
-    const arg = rest[i];
-    if (withValue.has(arg)) {
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--")) continue;
-    input = arg;
-    break;
-  }
+  const input = findInput(rest);
 
   if (!command || command === "help" || command === "-h" || command === "--help") {
     console.log(usage());
@@ -108,63 +183,9 @@ async function main(argv: string[]): Promise<number> {
   }
 
   try {
-    if (command === "analyze") {
-      if (!input) throw new NvidiaFixError("analyze needs an input file.");
-      const analysis = await analyze(input);
-      if (rest.includes("--json")) console.log(JSON.stringify(analysisToDict(analysis), null, 2));
-      else printAnalysis(analysis);
-      return 0;
-    }
-
-    if (command === "fix") {
-      if (!input) throw new NvidiaFixError("fix needs an input file.");
-      const result = await recover(input, {
-        outDir: value(rest, "--out") ?? null,
-        fullDecode: !rest.includes("--no-full-decode"),
-        fullLength: rest.includes("--full-length"),
-      });
-      if (rest.includes("--json")) {
-        console.log(JSON.stringify(result, null, 2));
-      } else if (result.status === "healthy") {
-        console.log(String(result.message));
-      } else {
-        const paths = result.paths as Json;
-        console.log(`Clean tail   : ${paths.video}`);
-        if (paths.audio) console.log(`Early audio  : ${paths.audio}`);
-        if (paths.full_length) {
-          const full = (result.full_length ?? {}) as Json;
-          console.log(`Full-length  : ${paths.full_length}`);
-          console.log(
-            `               ${Number(full.video_duration_seconds ?? 0).toFixed(3)} s, ` +
-              `${full.video_frames ?? 0} frames; first ` +
-              `${Number(full.filled_seconds ?? 0).toFixed(3)} s repeats footage from ` +
-              `${Number(full.timeline_start_seconds ?? 0).toFixed(3)}–` +
-              `${Number(full.timeline_end_seconds ?? 0).toFixed(3)} s (not the original opening)`
-          );
-        } else if (rest.includes("--full-length")) {
-          const block = (result.full_length ?? {}) as Json;
-          console.log(`Full-length  : not built (${block.skipped ?? block.error ?? "not built"})`);
-        }
-        console.log(`Report       : ${paths.report}`);
-        console.log(`Status       : ${result.status}`);
-        const recovery = result.recovery as Json;
-        const video = recovery.video as Json;
-        console.log(`Decode errors: ${video.decode_errors}`);
-        const warnings = Number(recovery.muxer_warnings ?? 0);
-        if (warnings > 0) {
-          console.log(`Muxer warning: ${warnings} timestamp warning(s) (not file damage)`);
-        }
-      }
-      return 0;
-    }
-
-    if (command === "explain") {
-      if (!input) throw new NvidiaFixError("explain needs an input file.");
-      const result = await explain(input, value(rest, "--map") ?? null);
-      if (rest.includes("--json")) console.log(JSON.stringify(result, null, 2));
-      else printExplain(result);
-      return 0;
-    }
+    if (command === "analyze") return await runAnalyze(input, rest);
+    if (command === "fix") return await runFix(input, rest);
+    if (command === "explain") return await runExplain(input, rest);
 
     console.log(usage());
     return 1;

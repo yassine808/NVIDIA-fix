@@ -77,10 +77,8 @@ export function duplicationVerdict(
 
   const matched = timed.filter((row) => row.matched);
   const first = matched.length > 0 ? ([toFloat(matched[0].t), toFloat(matched[0].src_t)] as [number, number]) : null;
-  const last =
-    matched.length > 0
-      ? ([toFloat(matched[matched.length - 1].t), toFloat(matched[matched.length - 1].src_t)] as [number, number])
-      : null;
+  const lastRow = matched.at(-1);
+  const last = lastRow ? ([toFloat(lastRow.t), toFloat(lastRow.src_t)] as [number, number]) : null;
 
   return {
     damagedSeconds,

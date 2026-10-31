@@ -11,7 +11,7 @@ import { fullLengthBlock } from "./rebuild";
 import { cutTail, decodeCheck, exportEarlyAudio, verifyFirstPacket } from "./verify";
 import {
   Analysis,
-  CAVEAT,
+  caveatFor,
   DECODE_VALIDATE_SECONDS,
   DecodeCheck,
   DuplicationVerdict,
@@ -23,12 +23,24 @@ import {
   toFloat,
 } from "./types";
 
+export type { Analysis } from "./types";
+
 export interface ProcessOptions {
   outDir?: string | null;
   fullDecode?: boolean;
   progress?: ProgressCallback | null;
   fullLength?: boolean;
 }
+
+interface CleanTail {
+  accepted: Sample;
+  verify: Json;
+  attempts: Json[];
+}
+
+type CandidateAttempt =
+  | { ok: true; verify: Json }
+  | { ok: false; failure: Json };
 
 function notify(progress: ProgressCallback | null | undefined, message: string): void {
   if (!progress) return;
@@ -51,6 +63,186 @@ function uniqueBase(outDir: string, stem: string, audioExt: string): string {
     base = `${stem}.clean-${index}`;
   }
   return base;
+}
+
+function emptyDecodeCheck(): DecodeCheck {
+  return {
+    errors: [],
+    warnings: [],
+    unclassified: [],
+    returncode: 0,
+    ok: true,
+  };
+}
+
+function blockingOutput(check: DecodeCheck): string[] {
+  if (check.errors.length > 0) return check.errors;
+  if (check.unclassified.length > 0) return check.unclassified;
+  return [`ffmpeg exited with ${check.returncode}`];
+}
+
+async function tryCandidate(
+  source: string,
+  candidate: Sample,
+  attempt: number,
+  total: number,
+  temp: string,
+  videoOut: string,
+  progress: ProgressCallback | null
+): Promise<CandidateAttempt> {
+  try {
+    notify(
+      progress,
+      `Cutting the clean tail from ${candidate.pts.toFixed(3)} s ` +
+        `(candidate ${attempt} of ${total})…`
+    );
+    await cutTail(source, candidate, temp);
+    notify(progress, "Verifying that the cut starts on the exact source packet…");
+    const check = await verifyFirstPacket(source, candidate, temp);
+    if (!check.ok) {
+      return { ok: false, failure: { seconds: round6(candidate.pts), error: check.reason } };
+    }
+    notify(progress, "Checking the first seconds of the recovered video…");
+    const startCheck = await decodeCheck(temp, DECODE_VALIDATE_SECONDS);
+    if (!startCheck.ok) {
+      return {
+        ok: false,
+        failure: {
+          seconds: round6(candidate.pts),
+          error: "decode errors at start of cut",
+          details: blockingOutput(startCheck).slice(0, 5),
+        },
+      };
+    }
+    fs.renameSync(temp, videoOut);
+    return { ok: true, verify: check };
+  } finally {
+    if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
+  }
+}
+
+/** Walk the clean keyframe candidates until one cut verifies end to end. */
+async function acceptCleanTail(
+  source: string,
+  analysis: Analysis,
+  destination: string,
+  base: string,
+  videoOut: string,
+  progress: ProgressCallback | null
+): Promise<CleanTail> {
+  const attempts: Json[] = [];
+  for (let index = 0; index < analysis.candidates.length; index += 1) {
+    const candidate = analysis.candidates[index];
+    const attempt = index + 1;
+    const temp = path.join(destination, `${base}.try${attempt}.part.mp4`);
+    const result = await tryCandidate(
+      source,
+      candidate,
+      attempt,
+      analysis.candidates.length,
+      temp,
+      videoOut,
+      progress
+    );
+    if (!result.ok) {
+      attempts.push(result.failure);
+      continue;
+    }
+    return { accepted: candidate, verify: result.verify, attempts };
+  }
+
+  throw new ProcessingError(
+    `Could not produce a clean tail. Every clean keyframe candidate failed verification: ${JSON.stringify(attempts.slice(0, 3))}`
+  );
+}
+
+async function exportAudio(
+  source: string,
+  cutPoint: number,
+  audioOut: string,
+  progress: ProgressCallback | null
+): Promise<Json | null> {
+  try {
+    notify(progress, "Exporting the audio from before the cut…");
+    await exportEarlyAudio(source, cutPoint, audioOut);
+    return {
+      name: path.basename(audioOut),
+      size_bytes: fs.statSync(audioOut).size,
+      duration_seconds: round6(await probeDuration(audioOut)),
+    };
+  } catch (error) {
+    if (!(error instanceof NvidiaFixError)) throw error;
+    if (fs.existsSync(audioOut)) fs.rmSync(audioOut, { force: true });
+    return null;
+  }
+}
+
+async function verifyVideo(
+  videoOut: string,
+  fullDecode: boolean,
+  progress: ProgressCallback | null
+): Promise<DecodeCheck> {
+  if (!fullDecode) return emptyDecodeCheck();
+  notify(progress, "Decoding the recovered video to verify it…");
+  return decodeCheck(videoOut);
+}
+
+async function measureDuration(videoOut: string): Promise<number> {
+  let duration = await probeDuration(videoOut);
+  try {
+    const outputMedia = await probeMedia(videoOut);
+    duration = toFloat(outputMedia.video.duration, duration);
+  } catch {
+    // keep the format-level duration
+  }
+  return duration;
+}
+
+function loadDuplication(
+  source: string,
+  lastBad: Sample | null
+): { duplication: Json | null; verdict: DuplicationVerdict | null } {
+  if (!lastBad) return { duplication: null, verdict: null };
+  try {
+    const verdict = loadDuplicationVerdict(source, lastBad.pts);
+    return { duplication: verdictToDict(verdict), verdict };
+  } catch (error) {
+    return {
+      duplication: { unavailable: error instanceof Error ? error.message : String(error) },
+      verdict: null,
+    };
+  }
+}
+
+interface FullLengthRequest {
+  enabled: boolean;
+  source: string;
+  videoOut: string;
+  duration: number;
+  accepted: Sample;
+  verdict: DuplicationVerdict | null;
+  destination: string;
+  base: string;
+  fullDecode: boolean;
+  progress: ProgressCallback | null;
+}
+
+async function buildFullLength(
+  request: FullLengthRequest
+): Promise<{ info: Json | null; output: string | null }> {
+  if (!request.enabled) return { info: null, output: null };
+  const block = await fullLengthBlock({
+    source: request.source,
+    tailVideo: request.videoOut,
+    tailDuration: request.duration,
+    cleanStart: request.accepted.pts,
+    verdict: request.verdict,
+    destination: request.destination,
+    base: request.base,
+    fullDecode: request.fullDecode,
+    progress: request.progress,
+  });
+  return { info: block.info, output: block.output };
 }
 
 export async function process(
@@ -96,124 +288,36 @@ export async function process(
   const audioOut = path.join(destination, `${base}.audio${audioExt}`);
   const reportOut = path.join(destination, `${base}.report.json`);
 
-  let accepted: Sample | null = null;
-  let verify: Json = {};
-  const attempts: Json[] = [];
+  const { accepted, verify, attempts } = await acceptCleanTail(
+    source,
+    analysis,
+    destination,
+    base,
+    videoOut,
+    progress
+  );
 
-  for (let index = 0; index < analysis.candidates.length; index += 1) {
-    const candidate = analysis.candidates[index];
-    const attempt = index + 1;
-    const temp = path.join(destination, `${base}.try${attempt}.part.mp4`);
-    try {
-      notify(
-        progress,
-        `Cutting the clean tail from ${candidate.pts.toFixed(3)} s ` +
-          `(candidate ${attempt} of ${analysis.candidates.length})…`
-      );
-      await cutTail(source, candidate, temp);
-      notify(progress, "Verifying that the cut starts on the exact source packet…");
-      const check = await verifyFirstPacket(source, candidate, temp);
-      if (!check.ok) {
-        attempts.push({ seconds: round6(candidate.pts), error: check.reason });
-        continue;
-      }
-      notify(progress, "Checking the first seconds of the recovered video…");
-      const startCheck = await decodeCheck(temp, DECODE_VALIDATE_SECONDS);
-      if (!startCheck.ok) {
-        const blocking =
-          startCheck.errors.length > 0
-            ? startCheck.errors
-            : startCheck.unclassified.length > 0
-              ? startCheck.unclassified
-              : [`ffmpeg exited with ${startCheck.returncode}`];
-        attempts.push({
-          seconds: round6(candidate.pts),
-          error: "decode errors at start of cut",
-          details: blocking.slice(0, 5),
-        });
-        continue;
-      }
-      fs.renameSync(temp, videoOut);
-      accepted = candidate;
-      verify = check;
-      break;
-    } finally {
-      if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
-    }
-  }
+  const audioInfo = analysis.media.audio
+    ? await exportAudio(source, accepted.pts, audioOut, progress)
+    : null;
 
-  if (!accepted) {
-    throw new ProcessingError(
-      `Could not produce a clean tail. Every clean keyframe candidate failed verification: ${JSON.stringify(attempts.slice(0, 3))}`
-    );
-  }
-
-  let audioInfo: Json | null = null;
-  if (analysis.media.audio) {
-    try {
-      notify(progress, "Exporting the audio from before the cut…");
-      await exportEarlyAudio(source, accepted.pts, audioOut);
-      audioInfo = {
-        name: path.basename(audioOut),
-        size_bytes: fs.statSync(audioOut).size,
-        duration_seconds: round6(await probeDuration(audioOut)),
-      };
-    } catch (error) {
-      if (!(error instanceof NvidiaFixError)) throw error;
-      if (fs.existsSync(audioOut)) fs.rmSync(audioOut, { force: true });
-      audioInfo = null;
-    }
-  }
-
-  let decodeResult: DecodeCheck = {
-    errors: [],
-    warnings: [],
-    unclassified: [],
-    returncode: 0,
-    ok: true,
-  };
-  if (fullDecode) {
-    notify(progress, "Decoding the recovered video to verify it…");
-    decodeResult = await decodeCheck(videoOut);
-  }
+  const decodeResult = await verifyVideo(videoOut, fullDecode, progress);
   const decodeErrors = decodeResult.errors;
-
-  let duration = await probeDuration(videoOut);
-  try {
-    const outputMedia = await probeMedia(videoOut);
-    duration = toFloat(outputMedia.video.duration, duration);
-  } catch {
-    // keep the format-level duration
-  }
-
-  let duplication: Json | null = null;
-  let verdict: DuplicationVerdict | null = null;
-  if (analysis.lastBad) {
-    try {
-      verdict = loadDuplicationVerdict(source, analysis.lastBad.pts);
-      duplication = verdictToDict(verdict);
-    } catch (error) {
-      duplication = { unavailable: error instanceof Error ? error.message : String(error) };
-    }
-  }
-
-  let fullLengthInfo: Json | null = null;
-  let fullLengthOut: string | null = null;
-  if (fullLength) {
-    const block = await fullLengthBlock(
-      source,
-      videoOut,
-      duration,
-      accepted.pts,
-      verdict,
-      destination,
-      base,
-      fullDecode,
-      progress
-    );
-    fullLengthInfo = block.info;
-    fullLengthOut = block.output;
-  }
+  const duration = await measureDuration(videoOut);
+  const { duplication, verdict } = loadDuplication(source, analysis.lastBad);
+  const fullLengthBlockResult = await buildFullLength({
+    enabled: fullLength,
+    source,
+    videoOut,
+    duration,
+    accepted,
+    verdict,
+    destination,
+    base,
+    fullDecode,
+    progress,
+  });
+  const fullLengthInfo = fullLengthBlockResult.info;
 
   const report: Json = {
     ...analysisDoc,
@@ -239,7 +343,7 @@ export async function process(
     },
     duplication,
     full_length: fullLengthInfo,
-    caveat: CAVEAT,
+    caveat: caveatFor(accepted.pts),
   };
 
   if (decodeErrors.length > 0) {
@@ -249,7 +353,7 @@ export async function process(
     report.warning =
       "The full decode produced output this tool could not classify. Inspect recovery.unclassified_output.";
   }
-  if (fullLengthInfo && fullLengthInfo.decode_errors) {
+  if (fullLengthInfo?.decode_errors) {
     report.warning =
       "The clean tail verifies, but the full-length rebuild reported decoder errors. Inspect full_length.decode_error_sample.";
   }
@@ -261,10 +365,8 @@ export async function process(
     paths: {
       video: videoOut,
       audio: audioInfo ? audioOut : null,
-      full_length: fullLengthOut,
+      full_length: fullLengthBlockResult.output,
       report: reportOut,
     },
   };
 }
-
-export type { Analysis };

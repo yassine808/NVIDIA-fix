@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   quality:
-    name: 1 / Quality and docs
+    name: Quality and docs
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -40,7 +40,7 @@ jobs:
           python -c "from pathlib import Path; readme = Path('README.md').read_text(encoding='utf-8'); assert 'releases/latest' in readme, 'README download link missing'; assert Path('LICENSE').is_file(), 'LICENSE missing'; assert Path('package.json').is_file(), 'package.json missing'; assert Path('build/icon.ico').is_file(), 'app icon missing'; print('release files OK')"
 
   unit:
-    name: 2 / Engine tests
+    name: Engine tests
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -55,7 +55,7 @@ jobs:
         run: npm test
 
   desktop:
-    name: 3 / Desktop app
+    name: Desktop app
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -70,7 +70,7 @@ jobs:
         run: npm run build
 
   cli:
-    name: 4 / CLI recovery
+    name: CLI recovery
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

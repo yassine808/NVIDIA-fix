@@ -4,11 +4,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { NvidiaFixError } from "./errors";
 import { ffprobeJson, run, FFMPEG } from "./tools";
 import { decodeCheck } from "./verify";
 import {
-  DUPLICATION_MAP_NAME,
   DuplicationVerdict,
   FULL_LENGTH_CAVEAT,
   FULL_LENGTH_SUFFIX,
@@ -20,12 +18,14 @@ import {
   toFloat,
 } from "./types";
 
+export { DUPLICATION_MAP_NAME } from "./types";
+
 export function planFullLength(
   cleanStart: number,
   tailDuration: number,
   verdict: DuplicationVerdict | null
 ): FullLengthPlan | null {
-  if (!verdict || !verdict.firstMatch || !verdict.lastMatch) return null;
+  if (!verdict?.firstMatch || !verdict.lastMatch) return null;
   const needed = cleanStart;
   if (needed < MIN_FULL_LENGTH_SECONDS || tailDuration < MIN_FULL_LENGTH_SECONDS) return null;
 
@@ -63,7 +63,9 @@ export function planToDict(plan: FullLengthPlan): Json {
 
 /** A concat-demuxer line that survives spaces, quotes and Windows paths. */
 export function concatEntry(target: string): string {
-  const text = target.replace(/\\/g, "/").replace(/'/g, "'\\''");
+  // A single backslash cannot be written with String.raw (it would escape the
+  // closing backtick), so keep the escaped JS literal and use replaceAll.
+  const text = target.replaceAll("\\", "/").replaceAll("'", "'\\''");
   return `file '${text}'`;
 }
 
@@ -212,17 +214,23 @@ export async function rebuildFullLength(
   return info;
 }
 
+export interface FullLengthBlockOptions {
+  source: string;
+  tailVideo: string;
+  tailDuration: number;
+  cleanStart: number;
+  verdict: DuplicationVerdict | null;
+  destination: string;
+  base: string;
+  fullDecode: boolean;
+  progress: ProgressCallback | null;
+}
+
 export async function fullLengthBlock(
-  source: string,
-  tailVideo: string,
-  tailDuration: number,
-  cleanStart: number,
-  verdict: DuplicationVerdict | null,
-  destination: string,
-  base: string,
-  fullDecode: boolean,
-  progress: ProgressCallback | null
+  options: FullLengthBlockOptions
 ): Promise<{ info: Json; output: string | null }> {
+  const { source, tailVideo, tailDuration, cleanStart, verdict, destination, base } = options;
+  const { fullDecode, progress } = options;
   if (!verdict) {
     return {
       info: {
@@ -251,5 +259,3 @@ export async function fullLengthBlock(
     return { info: { error: message }, output: null };
   }
 }
-
-export { DUPLICATION_MAP_NAME };

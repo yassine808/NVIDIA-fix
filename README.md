@@ -14,6 +14,15 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="NVIDIA-Fix home screen: drop a recording, click Recover video, get a clean copy" width="760">
+</p>
+
+<p align="center">
+  <b>Drop a ShadowPlay clip → click Recover video → get a clean copy beside the original.</b><br>
+  No uploading, no re-encoding, no cloud. Your recording never leaves the machine.
+</p>
+
 NVIDIA-Fix is a native Windows desktop app and command-line tool for a specific
 ShadowPlay failure: the recorder replaces the beginning of a clip with a
 byte-shifted copy of later footage while leaving the MP4 index intact. Players
@@ -59,6 +68,10 @@ original.
 
 ## What you get
 
+<p align="center">
+  <img src="docs/screenshots/result.png" alt="NVIDIA-Fix result page: verified clean video, lost/recovered timeline, saved files" width="760">
+</p>
+
 For an input named `clip.mp4`:
 
 | Output | Contents |
@@ -80,22 +93,21 @@ label it that way.
 
 ## Desktop app (Windows)
 
-### 1. Install ffmpeg
+### ffmpeg ships with the app
 
-The app uses `ffmpeg` and `ffprobe`; they are not bundled inside the `.exe`.
+ffmpeg and ffprobe are bundled: `npm run fetch-ffmpeg` downloads the latest
+Windows build from gyan.dev into `recovery/tools/ff/`, `npm run dist` copies it
+into the installer, and the engine always prefers that copy over anything on
+`PATH` (override with `FFMPEG_BINARY` / `FFPROBE_BINARY` if you want your own).
+
+Building a package therefore needs network access once; running the app never
+does. If you prefer a system install anyway:
 
 ```powershell
 winget install Gyan.FFmpeg
 ```
 
-Reopen your terminal and verify:
-
-```powershell
-ffmpeg -version
-ffprobe -version
-```
-
-### 2. Download and run
+### Download and run
 
 Download **[NVIDIA-Fix.exe](https://github.com/yassine808/NVIDIA-fix/releases/latest/download/NVIDIA-Fix.exe)**
 from the latest release and double-click it.
@@ -132,7 +144,11 @@ progress; cancel; and a copyable path for every output.
 Output names are `‹name›.clean.mp4`, `‹name›.clean.audio.m4a` and
 `‹name›.clean.report.json`, all next to the input.
 
-## CLI
+## CLI (from a source checkout)
+
+The engine also has a command-line front end, but it is **not** part of the
+installed app — there is no `nvidia-fix.exe` command on `PATH`. Run it from a
+clone:
 
 ```powershell
 # inspect without writing anything
@@ -246,10 +262,11 @@ npm install
 npm run dist
 ```
 
-`npm run dist` compiles the TypeScript app, stages the engine (plus the portable
-ffmpeg build from `recovery/tools/ff/` when it exists) and runs electron-builder,
-producing `release\NVIDIA-Fix-1.2.0-portable.exe`. Without a staged ffmpeg build,
-the packaged app expects `ffmpeg` and `ffprobe` on `PATH`.
+`npm run dist` downloads the latest ffmpeg build if needed, compiles the
+TypeScript app, stages the engine plus that portable ffmpeg, and runs
+electron-builder, producing `release\NVIDIA-Fix-1.2.0-portable.exe`. The
+installer carries its own `ffmpeg.exe`/`ffprobe.exe`, so the target machine
+needs nothing installed.
 
 ## Tests
 

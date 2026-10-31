@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src", "renderer");
 const dest = path.join(root, "dist", "renderer");
 
-fs.mkdirSync(dest, { recursive: true });
-fs.copyFileSync(path.join(src, "index.html"), path.join(dest, "index.html"));
+fs.rmSync(dest, { recursive: true, force: true });
+fs.cpSync(src, dest, { recursive: true });
 fs.copyFileSync(path.join(root, "build", "icon.png"), path.join(dest, "icon.png"));
 console.log("copied renderer assets to dist/renderer");

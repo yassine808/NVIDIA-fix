@@ -109,8 +109,8 @@ export async function probePackets(target: string, timeoutMs = 300_000): Promise
     }
     samples.push({
       index,
-      pts: toFloat(pts !== undefined ? pts : dts),
-      dts: toFloat(dts !== undefined ? dts : pts),
+      pts: toFloat(pts ?? dts),
+      dts: toFloat(dts ?? pts),
       size: Math.trunc(toFloat(size)),
       pos: Math.trunc(toFloat(pos)),
       flags: String(packet.flags ?? ""),

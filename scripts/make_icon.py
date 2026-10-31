@@ -34,30 +34,39 @@ def inside(x: float, y: float) -> bool:
     return (x + y) <= (1.0 + CUT) + 1e-9
 
 
+def coverage(px: int, py: int, n: int, step: float) -> int:
+    """Supersampled points of pixel (px, py) that fall inside the mark."""
+    hits = 0
+    for sy in range(n):
+        y = (py * n + sy + 0.5) * step
+        for sx in range(n):
+            x = (px * n + sx + 0.5) * step
+            if inside(x, y):
+                hits += 1
+    return hits
+
+
+def blend(hits: int, total: int) -> tuple:
+    """Pixel colour from the covered fraction of its supersamples."""
+    if hits == total:
+        return GREEN
+    if hits == 0:
+        return BLACK
+    # Blend the coverage into the black background.
+    a = hits / total
+    return tuple(round(BLACK[i] + (GREEN[i] - BLACK[i]) * a) for i in range(3))
+
+
 def raster(size: int) -> list[bytes]:
     """RGBA rows, 4x4 supersampled so the diagonal edge is not jagged."""
     n = SUPERSAMPLE
     step = 1.0 / (size * n)
+    total = n * n
     rows: list[bytes] = []
     for py in range(size):
         row = bytearray()
         for px in range(size):
-            hits = 0
-            for sy in range(n):
-                y = (py * n + sy + 0.5) * step
-                for sx in range(n):
-                    x = (px * n + sx + 0.5) * step
-                    if inside(x, y):
-                        hits += 1
-            total = n * n
-            if hits == total:
-                colour = GREEN
-            elif hits == 0:
-                colour = BLACK
-            else:
-                # Blend the coverage into the black background.
-                a = hits / total
-                colour = tuple(round(BLACK[i] + (GREEN[i] - BLACK[i]) * a) for i in range(3))
+            colour = blend(coverage(px, py, n, step), total)
             row += bytes((colour[0], colour[1], colour[2], 255))
         rows.append(bytes(row))
     return rows
