@@ -251,8 +251,8 @@ function runRecovery(request: RecoveryRequest): Promise<RecoveryResult> {
 function createWindow(): void {
   const win = new BrowserWindow({
     // Fixed size: the layout is designed for one window and never rescales.
-    width: 1188,
-    height: 734,
+    width: 1184,
+    height: 740,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
