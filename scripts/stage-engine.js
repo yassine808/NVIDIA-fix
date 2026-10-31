@@ -14,7 +14,7 @@ const path = require("node:path");
 
 const here = __dirname;
 const root = path.resolve(here, "..");
-const repo = path.resolve(root, "..");
+const repo = root;
 const stage = path.join(root, ".stage");
 
 fs.rmSync(stage, { recursive: true, force: true });

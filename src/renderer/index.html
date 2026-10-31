@@ -18,29 +18,28 @@
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
-    html { scrollbar-width: none; }
-    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
-    html, body { margin: 0; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
     body {
-      background: var(--k); color: var(--t); min-height: 100vh;
-      font: 400 16px/1.5 Barlow, Bahnschrift, "DIN Alternate", "Segoe UI", system-ui, sans-serif;
+      background: var(--k); color: var(--t);
+      font: 400 16px/1.45 Barlow, Bahnschrift, "DIN Alternate", "Segoe UI", system-ui, sans-serif;
       font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 800px; margin: 0 auto; padding: 32px 24px 72px; }
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 72px; color: var(--d); font-size: 14px; }
+    .wrap { height: 100vh; max-width: 1184px; margin: 0 auto; padding: 24px 56px 40px; display: flex; flex-direction: column; }
+    header { display: flex; justify-content: space-between; align-items: center; height: 32px; flex: none; color: var(--d); font-size: 14px; }
     .brand { display: flex; align-items: center; gap: 10px; color: var(--t); font-weight: 600; font-size: 17px; }
     .mark { width: 22px; height: 22px; background: var(--g); clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%); }
-    h1 { font-size: clamp(42px, 8vw, 76px); line-height: 1; letter-spacing: -.025em; font-weight: 600; margin: 0 0 40px; }
-    h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; color: var(--m); }
+    main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr; gap: 56px; align-items: center; }
+    .col { min-width: 0; }
+    h1 { font-size: 60px; line-height: 1; letter-spacing: -.025em; font-weight: 600; margin: 0 0 20px; }
+    h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: var(--m); }
     p { margin: 0; }
     a { color: var(--g); }
     :focus-visible { outline: 2px solid var(--t); outline-offset: 3px; }
 
-    /* buttons */
     button { font: inherit; cursor: pointer; }
     .btn {
       appearance: none; border: 0; border-radius: 2px; background: var(--g); color: var(--k);
-      font-weight: 700; font-size: 17px; padding: 14px 30px; text-decoration: none; display: inline-block;
+      font-weight: 700; font-size: 18px; padding: 15px 34px; text-decoration: none; display: inline-block;
       transition: background .15s;
     }
     .btn:hover { background: var(--g2); }
@@ -48,8 +47,18 @@
     .link { background: none; border: 0; padding: 0; color: var(--g); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
     .link:hover { color: var(--g2); }
 
+    /* home: left column */
+    .lede { color: var(--m); font-size: 19px; margin-bottom: 36px; max-width: 30ch; }
+    .how { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; counter-reset: s; }
+    .how li { display: flex; align-items: center; gap: 14px; font-size: 18px; font-weight: 500; counter-increment: s; }
+    .how li::before {
+      content: counter(s); width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+      border: 2px solid var(--g); color: var(--g); border-radius: 50%; font-weight: 700; font-size: 15px;
+    }
+    .safe { margin-top: 36px; color: var(--d); font-size: 15px; }
+
     /* drop zone */
-    .zone { position: relative; background: var(--p); border-radius: 2px; padding: 52px 40px 32px; min-height: 280px; transition: background .2s; }
+    .zone { position: relative; background: var(--p); border-radius: 2px; padding: 44px 40px 28px; height: 340px; display: flex; flex-direction: column; transition: background .2s; }
     .zone::before {
       content: ""; position: absolute; inset: 12px; pointer-events: none; --c: var(--d);
       background:
@@ -65,82 +74,72 @@
     .v { display: none; }
     .zone[data-state=idle] .v-idle, .zone[data-state=ready] .v-ready, .zone[data-state=working] .v-work { display: block; }
     .big { font-size: 34px; font-weight: 600; line-height: 1.15; margin-bottom: 8px; overflow-wrap: anywhere; }
-    .sub { color: var(--m); }
+    .sub { color: var(--m); overflow-wrap: anywhere; }
     .sub b { color: var(--g); font-weight: 600; }
-    .ready-actions { display: flex; align-items: center; gap: 24px; margin-top: 26px; flex-wrap: wrap; }
+    .ready-actions { display: flex; align-items: center; gap: 24px; margin-top: 24px; flex-wrap: wrap; }
 
-    .strip { display: flex; align-items: flex-end; gap: 3px; height: 44px; margin-top: 36px; }
+    .strip { display: flex; align-items: flex-end; gap: 3px; height: 44px; margin-top: auto; }
     .strip i { flex: 1; background: var(--ln); border-radius: 1px; transition: background .15s; }
     .strip i.bad { background: var(--bad); }
     .strip i.ok { background: var(--g); }
     .strip i.hd { background: var(--t); }
     .zone[data-over] .strip i { background: var(--gd); }
 
-    /* working */
-    .steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
+    .steps { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 8px; }
     .steps li { display: flex; align-items: center; gap: 12px; color: var(--d); font-size: 17px; }
     .steps li::before { content: ""; width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 50%; }
     .steps li.done { color: var(--m); }
     .steps li.done::before { background: var(--g); border-color: var(--g); }
     .steps li.on { color: var(--t); font-weight: 600; }
     .steps li.on::before { background: var(--g); border-color: var(--g); animation: pulse 1.1s ease-out infinite; }
-    .steps li[data-p].on::after { content: attr(data-p); color: var(--g); margin-left: auto; }
     @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(118,185,0,.7); } to { box-shadow: 0 0 0 10px rgba(118,185,0,0); } }
 
     /* below zone */
-    .alt { margin-top: 28px; }
-    .alt label { display: block; font-weight: 600; margin-bottom: 8px; }
+    .alt { margin-top: 20px; display: flex; gap: 10px; align-items: center; }
+    .alt label { font-weight: 600; white-space: nowrap; color: var(--m); }
     .path {
       width: 100%; background: var(--k); color: var(--t); border: 1px solid var(--ln); border-radius: 2px;
-      font: inherit; padding: 13px 14px; transition: border-color .15s;
+      font: inherit; padding: 11px 14px; transition: border-color .15s;
     }
     .path::placeholder { color: var(--d); }
     .path:focus { outline: none; border-color: var(--g); }
-    .help { color: var(--d); font-size: 14px; margin-top: 8px; }
-    .check { display: flex; align-items: center; gap: 10px; margin-top: 24px; color: var(--m); cursor: pointer; }
+    .help { color: var(--d); font-size: 14px; }
+    .check { display: flex; align-items: center; gap: 10px; margin-top: 18px; color: var(--m); cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--g); margin: 0; }
     .check span { color: var(--d); }
-    .notice { margin-bottom: 24px; padding: 14px 16px; border-left: 3px solid var(--bad); background: #2a1212; }
+    .notice { margin-bottom: 16px; padding: 12px 16px; border-left: 3px solid var(--bad); background: #2a1212; }
     .notice.good { border-color: var(--g); background: #172008; }
     .notice.warn { border-color: var(--warn); background: #2a2308; }
 
     /* result */
-    .chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 20px; color: var(--g); }
+    .chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 16px; color: var(--g); }
     .chip.warn { color: var(--warn); }
     .chip::before { content: ""; width: 10px; height: 10px; background: currentColor; border-radius: 50%; }
-    .res h1 { margin-bottom: 14px; }
-    .res .lede { color: var(--m); font-size: 18px; margin-bottom: 40px; overflow-wrap: anywhere; }
+    .res h1 { font-size: 52px; margin-bottom: 10px; }
+    .res .lede { font-size: 17px; margin-bottom: 24px; max-width: none; overflow-wrap: anywhere; }
     .res .strip { height: 64px; margin: 0 0 10px; }
     .legend { display: flex; justify-content: space-between; gap: 16px; color: var(--m); font-size: 15px; }
     .legend b { color: var(--t); font-weight: 600; }
-    .stats { display: flex; gap: 56px; margin: 40px 0; flex-wrap: wrap; }
-    .stat .v2 { font-size: 40px; font-weight: 500; line-height: 1.1; }
+    .stats { display: flex; gap: 48px; margin: 24px 0 8px; }
+    .stat .v2 { font-size: 36px; font-weight: 500; line-height: 1.1; }
     .stat .k { color: var(--m); font-size: 15px; }
     .files { display: grid; gap: 2px; margin-bottom: 8px; }
-    .file { background: var(--p); padding: 18px 20px; }
+    .file { background: var(--p); padding: 14px 18px; }
     .fh { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
     .fh span { color: var(--m); font-weight: 400; }
-    .fn { color: var(--g); margin: 2px 0 12px; overflow-wrap: anywhere; }
+    .fn { color: var(--g); margin: 0 0 8px; overflow-wrap: anywhere; line-height: 1.3; }
     .row { display: flex; gap: 8px; }
-    .row .path { flex: 1; min-width: 0; }
-    .copy { background: none; border: 1px solid var(--d); color: var(--t); border-radius: 2px; padding: 0 20px; font-weight: 600; min-width: 88px; transition: border-color .15s, color .15s; }
+    .row .path { flex: 1; min-width: 0; padding: 8px 12px; }
+    .copy { background: none; border: 1px solid var(--d); color: var(--t); border-radius: 2px; padding: 0 18px; font-weight: 600; min-width: 84px; transition: border-color .15s, color .15s; }
     .copy:hover { border-color: var(--g); color: var(--g); }
-    .fd { color: var(--d); font-size: 14px; margin-top: 8px; }
-    code { color: var(--m); font-size: .92em; }
-    details { margin-top: 32px; color: var(--m); }
+    .fd { color: var(--d); font-size: 13px; margin-top: 6px; }
+    code { color: var(--m); font-size: .92em; overflow-wrap: anywhere; }
+    details { margin-top: 12px; color: var(--m); font-size: 14px; }
     summary { cursor: pointer; font-weight: 600; color: var(--t); }
-    details ul { margin: 12px 0 0; padding-left: 20px; }
-    details li { margin: 6px 0; }
-    .caveat { margin: 32px 0; color: var(--m); max-width: 60ch; }
+    details ul { margin: 8px 0 0; padding-left: 20px; }
+    details li { margin: 4px 0; }
+    .caveat { margin: 16px 0 24px; color: var(--m); font-size: 15px; }
 
-    @media (max-width: 640px) {
-      header { margin-bottom: 44px; }
-      .zone { padding: 40px 24px 24px; }
-      .big { font-size: 28px; }
-      .stats { gap: 32px; }
-      .row { flex-direction: column; }
-      .copy { padding: 11px; }
-    }
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   </style>
 </head>
@@ -152,84 +151,97 @@
     </header>
 
     <main id="home">
-      <h1>Recover the clean tail.</h1>
+      <div class="col">
+        <h1>Recover the clean tail.</h1>
+        <p class="lede">Fix recordings with a damaged start.</p>
+        <ol class="how">
+          <li>Drop your recording</li>
+          <li>Click “Recover video”</li>
+          <li>Get a clean copy</li>
+        </ol>
+        <p class="safe">Your original is never modified.</p>
+      </div>
 
-      <div class="notice" id="note" hidden></div>
+      <div class="col">
+        <div class="notice" id="note" hidden></div>
 
-      <form id="fix-form" method="post" action="#">
-        <div class="zone" id="zone" data-state="idle">
-          <div class="v v-idle">
-            <p class="big">Drop a recording</p>
-            <p class="sub">or <button type="button" class="link" id="browse">browse files</button></p>
-          </div>
-
-          <div class="v v-ready">
-            <p class="big" id="name"></p>
-            <p class="sub"><span id="size"></span> &nbsp;Saves as <b id="out"></b></p>
-            <div class="ready-actions">
-              <button type="submit" class="btn" id="go" disabled>Recover video</button>
-              <button type="button" class="link" id="clear">Clear</button>
+        <form id="fix-form" method="post" action="#">
+          <div class="zone" id="zone" data-state="idle">
+            <div class="v v-idle">
+              <p class="big">Drop a recording</p>
+              <p class="sub">or <button type="button" class="link" id="browse">browse files</button> &nbsp;·&nbsp; MP4, MOV, M4V</p>
             </div>
+
+            <div class="v v-ready">
+              <p class="big" id="name"></p>
+              <p class="sub"><span id="size"></span> &nbsp;Saves as <b id="out"></b></p>
+              <div class="ready-actions">
+                <button type="submit" class="btn" id="go" disabled>Recover video</button>
+                <button type="button" class="link" id="clear">Clear</button>
+              </div>
+            </div>
+
+            <div class="v v-work">
+              <p class="big">Recovering</p>
+              <ol class="steps" id="steps"></ol>
+            </div>
+
+            <div class="strip" id="strip" aria-hidden="true"></div>
+            <input type="file" id="file" accept=".mp4,.mov,.m4v,video/*" hidden>
           </div>
 
-          <div class="v v-work">
-            <p class="big">Recovering</p>
-            <ol class="steps" id="steps"></ol>
+          <div class="alt">
+            <label for="video_path">Or paste path</label>
+            <input class="path" type="text" id="video_path" name="video_path" value=""
+                   placeholder="D:\Videos\ShadowPlay\recording.mp4"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" class="link" id="use-sample" data-path="" hidden>Sample</button>
           </div>
 
-          <div class="strip" id="strip" aria-hidden="true"></div>
-          <input type="file" id="file" accept=".mp4,.mov,.m4v,video/*" hidden>
-        </div>
-
-        <div class="alt">
-          <label for="video_path">Or paste the full path</label>
-          <input class="path" type="text" id="video_path" name="video_path" value=""
-                 placeholder="D:\Videos\ShadowPlay\recording.mp4"
-                 autocomplete="off" spellcheck="false">
-          <p class="help">MP4, MOV, M4V. “Copy as path” works.
-            <button type="button" class="link" id="use-sample" data-path="" hidden>Use sample</button></p>
-        </div>
-
-        <label class="check">
-          <input type="checkbox" name="full_decode" value="1" checked>
-          Verify the full video after cutting <span>Slower, recommended</span>
-        </label>
-        <p class="help">Your original is never modified.</p>
-      </form>
+          <label class="check">
+            <input type="checkbox" name="full_decode" value="1" checked>
+            Verify the full video after cutting <span>Slower, recommended</span>
+          </label>
+        </form>
+      </div>
     </main>
 
     <main class="res" id="result" hidden>
-      <div class="chip" id="res-chip"></div>
-      <h1 id="res-title">Clean video recovered.</h1>
-      <p class="lede" id="res-name"></p>
+      <div class="col">
+        <div class="chip" id="res-chip"></div>
+        <h1 id="res-title">Clean video recovered.</h1>
+        <p class="lede" id="res-name"></p>
 
-      <div class="notice" id="res-warning" hidden></div>
+        <div class="notice" id="res-warning" hidden></div>
 
-      <div class="strip" id="res-strip"></div>
-      <div class="legend" id="res-legend">
-        <span>Lost <b id="res-lost"></b></span>
-        <span>Recovered <b id="res-recovered"></b></span>
+        <div class="strip" id="res-strip"></div>
+        <div class="legend" id="res-legend">
+          <span>Lost <b id="res-lost"></b></span>
+          <span>Recovered <b id="res-recovered"></b></span>
+        </div>
+
+        <div class="stats" id="res-stats">
+          <div class="stat"><div class="v2" id="res-damaged"></div><div class="k">Damaged samples</div></div>
+          <div class="stat"><div class="v2" id="res-errors"></div><div class="k">Decode errors</div></div>
+        </div>
+
+        <details id="res-details" open>
+          <summary>How it was verified</summary>
+          <ul id="res-evidence"></ul>
+        </details>
       </div>
 
-      <div class="stats" id="res-stats">
-        <div class="stat"><div class="v2" id="res-damaged"></div><div class="k">Damaged samples</div></div>
-        <div class="stat"><div class="v2" id="res-errors"></div><div class="k">Decode errors</div></div>
+      <div class="col">
+        <div id="res-files-wrap">
+          <h2>Saved files</h2>
+          <div class="files" id="res-files"></div>
+          <p class="help"><span id="res-note"></span> <code id="res-dir"></code></p>
+        </div>
+
+        <p class="caveat" id="res-caveat"></p>
+
+        <a class="btn" href="#" id="res-again">Recover another</a>
       </div>
-
-      <div id="res-files-wrap">
-        <h2>Saved files</h2>
-        <div class="files" id="res-files"></div>
-        <p class="help"><span id="res-note"></span> <code id="res-dir"></code></p>
-      </div>
-
-      <p class="caveat" id="res-caveat"></p>
-
-      <a class="btn" href="#" id="res-again">Recover another</a>
-
-      <details id="res-details">
-        <summary>How it was verified</summary>
-        <ul id="res-evidence"></ul>
-      </details>
     </main>
   </div>
 

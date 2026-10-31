@@ -19,11 +19,11 @@ const PYTHON = process.env.NVIDIA_FIX_PYTHON || "python";
 
 // Packaged: resources/engine/ holds nvidia_fix.py, bridge.py and the portable
 // ffmpeg build, so the app never depends on the checkout being next to it.
-// Development: the engine is the repository the desktop/ folder sits in.
+// Development: the engine lives at the repository root.
 const PACKAGED = app.isPackaged;
 const ENGINE_ROOT = PACKAGED
   ? path.join(process.resourcesPath, "engine")
-  : path.resolve(app.getAppPath(), "..");
+  : app.getAppPath();
 const BRIDGE =
   process.env.NVIDIA_FIX_BRIDGE ||
   path.join(PACKAGED ? ENGINE_ROOT : app.getAppPath(), "scripts", "bridge.py");

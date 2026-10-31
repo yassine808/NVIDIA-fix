@@ -26,12 +26,6 @@ and writes a JSON report with the evidence.
 It is deliberately honest: **it recovers what still exists, and it tells you
 what was destroyed.**
 
-## Screenshots
-
-![NVIDIA-Fix main window](docs/screenshots/app.png)
-
-![Recovery result with the lost/recovered timeline](docs/screenshots/result.png)
-
 ## Why the first part cannot be rebuilt
 
 This is not a missing index, a bad moov atom, or a file-header problem. In the
@@ -106,51 +100,36 @@ ffprobe -version
 Download **[NVIDIA-Fix.exe](https://github.com/yassine808/NVIDIA-fix/releases/latest/download/NVIDIA-Fix.exe)**
 from the latest release and double-click it.
 
-1. Choose the corrupted recording.
-2. Choose where the recovered files should go (defaults to the source folder).
-3. Leave **Also rebuild the full length** ticked if you want the complete-length
-   rebuild as well (it needs a duplication map beside the input).
-4. Click **Recover clean tail**.
-5. When it finishes, use **Play video**, **Open folder**, or **Report**.
+1. Drop the corrupted recording, browse for it, or paste its full path.
+2. Leave **Verify the full video after cutting** ticked for the full decode.
+3. Click **Recover video**.
 
-The app shows the damage boundary, the recovered duration, packet count, decode
-errors, and a lost/recovered timeline. Recovery runs in a background thread; the
-window stays responsive. When the rebuild exists, the result card also shows its
-duration, its frame count, and which part of the timeline its opening repeats.
+Outputs are written next to the original, and the result page lists every file
+with its absolute path. The app shows the damage boundary, the recovered
+duration, packet count, decode errors, and a lost/recovered timeline. Recovery
+runs in a background process, the window stays responsive, and the run can be
+cancelled. When the rebuild exists, the result page also labels it as a rebuild.
 
 ### Run from source
 
-```powershell
-python desktop.py
-```
-
-Or double-click `NVIDIA-Fix.pyw` to launch without a console window.
-
-The desktop app needs Python 3.9+. ffmpeg/ffprobe are found on `PATH` when
-installed, otherwise the portable build in `recovery/tools/ff/` is used. Flask
-is only needed for the optional web UI.
-
-## TypeScript desktop app (`desktop/`)
-
-The new native front end is Electron + TypeScript and replaces the Flask web UI.
-It asks for one path, runs the same Python engine, and writes the outputs beside
-the original.
+The desktop app is Electron + TypeScript in this repository root. The recovery
+engine stays Python (`nvidia_fix.py`) and is spawned through
+`scripts/bridge.py`, which streams progress back to the window.
 
 ```powershell
-cd desktop
 npm install
 npm start
 ```
 
+`npm run build` type-checks and compiles `src/` into `dist/`. The renderer is
+sandboxed and has no Node access. `npm run smoke -- --path <video>` drives the
+real window end to end with only Node built-ins.
+
 Supported actions: **Browse files**, drag-and-drop, or paste a path; live
-progress; and a copyable path for every output. The renderer is sandboxed and
-has no Node access; the main process spawns `scripts/bridge.py`, which streams
-progress as JSON lines.
+progress; cancel; and a copyable path for every output.
 
 Output names are `‹name›.clean.mp4`, `‹name›.clean.audio.m4a` and
-`‹name›.clean.report.json`, all next to the input. See
-[`desktop/README.md`](desktop/README.md) for the smoke test
-(`npm run smoke -- --path ...`) and architecture.
+`‹name›.clean.report.json`, all next to the input.
 
 ## CLI
 
@@ -262,15 +241,14 @@ first.
 ## Build the Windows executable
 
 ```powershell
-pip install -r requirements.txt pyinstaller
-pyinstaller --noconfirm --onefile --windowed --name "NVIDIA-Fix" `
-  --icon assets\nvidia-fix.ico `
-  --add-data "assets\nvidia-fix.ico;assets" `
-  desktop.py
+npm install
+npm run dist
 ```
 
-The result is `dist\NVIDIA-Fix.exe`. The executable still expects ffmpeg and
-ffprobe on `PATH`.
+`npm run dist` compiles the TypeScript app, stages the engine (plus the portable
+ffmpeg build from `recovery/tools/ff/` when it exists) and runs electron-builder,
+producing `release\NVIDIA-Fix-1.2.0-portable.exe`. Without a staged ffmpeg build,
+the packaged app expects `ffmpeg` and `ffprobe` on `PATH`.
 
 ## Tests
 
@@ -279,9 +257,8 @@ python -m unittest discover -s tests -v
 ```
 
 The suite generates its own clean and deliberately corrupted clips with ffmpeg
-and exercises the detector, cutter, audio export, Flask path-based web flow, CLI,
-and the desktop UI (hidden window). The desktop test is skipped if Tk is
-unavailable.
+and exercises the detector, cutter, audio export, the duplication verdict, and
+the CLI.
 
 To run the real-recording integration test:
 
@@ -295,46 +272,15 @@ afterwards.
 
 ## CI
 
-Every push to `main` and every pull request runs five independent Windows checks
+Every push to `main` and every pull request runs four independent Windows checks
 from [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 | Check | What it proves |
 | --- | --- |
-| **1 / Quality and docs** | All Python entry points byte-compile; CLI version works; release files and screenshots exist |
-| **2 / Unit and integration tests** | Detector, cutter, audio export, web flow, and CLI behavior |
-| **3 / Desktop UI** | Hidden-window recovery and UI state; smoke path |
+| **1 / Quality and docs** | All Python entry points byte-compile; CLI version works; release files exist |
+| **2 / Unit and integration tests** | Detector, cutter, audio export, duplication verdict, and CLI behavior |
+| **3 / Desktop app** | `npm ci`, type-check, and the Electron build compile cleanly |
 | **4 / CLI recovery** | A synthetic corrupted MP4 is analyzed, recovered, and hash-checked end to end |
-| **5 / Windows executable** | PyInstaller builds the `.exe`, then the EXE recovers the fixture and writes a valid report |
-
-## Optional web UI
-
-A friendly local front end for people who would rather paste a path than use the
-CLI. It never uploads anything and asks for exactly one thing: the path to the
-recording.
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python app.py
-```
-
-Open <http://127.0.0.1:5000> (the browser opens automatically), paste the full
-path to the MP4/MOV/M4V — quotes from Explorer's *Copy as path* are accepted —
-and press **Recover video**. Processing is local and synchronous; a large
-recording can take a minute because the result is decoded to verify it.
-
-Outputs are written **beside the original file**, never uploaded:
-
-| File | Contents |
-| --- | --- |
-| `<name>.clean.mp4` | The recovered clean tail (stream copy) |
-| `<name>.clean.audio.m4a` | Surviving audio from before the cut |
-| `<name>.clean.report.json` | Boundary, hashes and decode verification |
-
-If an output already exists, a numbered name (`<name>.clean-2.mp4`) is used, so
-nothing is overwritten. Environment knobs: `NVIDIA_FIX_PORT`,
-`NVIDIA_FIX_HOST`, and `NVIDIA_FIX_NO_BROWSER=1` (don't auto-open the browser).
 
 ## FAQ
 
@@ -368,13 +314,13 @@ no clean keyframe exists.
 | Path | Purpose |
 | --- | --- |
 | `nvidia_fix.py` | Recovery engine, JSON report, CLI |
-| `desktop.py` | Native Tkinter desktop app (legacy) |
-| `desktop/` | Electron + TypeScript desktop app (new front end) |
-| `app.py` | Optional Flask web UI (legacy) |
-| `tests/` | Unit, integration, desktop, and real-file tests |
-| `scripts/` | CI fixture and end-to-end CLI check |
-| `docs/screenshots/` | README screenshots |
-| `.github/workflows/ci.yml` | Five Windows CI checks |
+| `src/` | Electron main process, preload bridge, renderer, shared types |
+| `scripts/bridge.py` | JSON-lines bridge that runs the engine for the app |
+| `scripts/` | Build helpers, CI fixture, end-to-end CLI check |
+| `build/` | App icon (window, taskbar, favicon) |
+| `tests/` | Unit, integration, and real-file tests |
+| `forensics/` | Standalone MP4 analysis tools used for the evidence chain |
+| `.github/workflows/ci.yml` | Four Windows CI checks |
 
 ## License
 

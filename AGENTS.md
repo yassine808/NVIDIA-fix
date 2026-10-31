@@ -26,9 +26,8 @@ update **Mission log** before you stop working.
 | `recovery/tools/ff/` | Portable ffmpeg/ffprobe 9.0.2 used for decode + stream copy. |
 | `forensics/` | Tracked, no-dependency analysis tools. Run with `PYTHONPATH=forensics`. |
 | `nvidia_fix.py` | Recovery engine + CLI (what the app runs). |
-| `desktop.py` | Tkinter desktop app (legacy). |
-| `desktop/` | Electron + TypeScript desktop app (new front end). |
-| `app.py`, `templates/` | Optional Flask UI (legacy). |
+| `src/` | Electron + TypeScript desktop app (main, preload, renderer). |
+| `build/` | App icon (window, taskbar, favicon). |
 | `tests/` | Unit + real-file tests. |
 
 Forensics entry points:

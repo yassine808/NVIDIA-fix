@@ -1,14 +1,14 @@
 """Generate the app icon from the page mark.
 
 The renderer's favicon and the ``.mark`` element in
-``desktop/src/renderer/index.html`` are the same shape:
+``src/renderer/index.html`` are the same shape:
 
     green (#76B900) square on black, with the bottom-right 30% corner cut
     off: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%)
 
 This script rasterises exactly that, so the window, the taskbar and the favicon
-are one identity. Output: ``desktop/build/icon.png`` (256 px) and
-``desktop/build/icon.ico`` (16-256 px, PNG frames). No third-party packages.
+are one identity. Output: ``build/icon.png`` (256 px) and
+``build/icon.ico`` (16-256 px, PNG frames). No third-party packages.
 
     python scripts/make_icon.py
 """
@@ -96,7 +96,7 @@ def ico(images: list[tuple[int, bytes]]) -> bytes:
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    out = root / "desktop" / "build"
+    out = root / "build"
     out.mkdir(parents=True, exist_ok=True)
 
     images = [(size, png(size)) for size in SIZES]

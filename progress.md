@@ -17,6 +17,9 @@
 - [x] Electron + TypeScript desktop front end under `desktop/`, tested through
       the real window on the corrupted recording.
 - [ ] Package the desktop app (installer/exe) and retire the legacy UIs.
+- [x] Retire the legacy Python UIs; flatten the Electron app to the repo root.
+- [ ] Port the recovery engine from Python to TypeScript (then delete
+      `nvidia_fix.py` and `scripts/bridge.py`).
 - [ ] 100% of the *original* opening: impossible from every local source.
 
 ## Environment rules
@@ -25,6 +28,21 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — Electron app moved to the repo root, Python UIs retired
+
+- Goal: one app at the top level of the repository instead of a `desktop/`
+  subfolder, with the dead Python front ends and their leftovers gone.
+- Done: moved `desktop/{package.json,package-lock.json,tsconfig.json,build,src,
+  scripts}` to the repo root and merged the two `scripts/` folders. Deleted
+  `desktop/.gitignore`, `desktop/README.md` and every empty leftover folder.
+  Updated the path assumptions (`ENGINE_ROOT` is now `app.getAppPath()`,
+  `stage-engine.js` uses the repo root), rewrote `.gitignore` for the root
+  layout, removed the Flask/Tk/PyInstaller references from `README.md` and
+  replaced the CI workflow with four jobs that match the actual repo.
+- Verified: `npm run build` clean from the root; the app launches from the root
+  checkout and the bridge still finds `nvidia_fix.py`.
+- Next: port the recovery engine to TypeScript, then remove the Python engine.
 
 ### 2026-10-31 — desktop uses Yassine's supplied frontend
 

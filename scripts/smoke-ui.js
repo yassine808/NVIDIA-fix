@@ -5,7 +5,7 @@
  * Chrome DevTools Protocol, starts a recovery, and waits for the result page.
  * Uses only Node built-ins. Example:
  *
- *   npm run smoke -- --path "..\recovery\Arc_Raiders corrupted.mp4"
+ *   npm run smoke -- --path "recovery\Arc_Raiders corrupted.mp4"
  */
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");

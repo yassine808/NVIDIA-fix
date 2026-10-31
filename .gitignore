@@ -4,8 +4,11 @@ __pycache__/
 venv/
 instance/
 .pytest_cache/
-build/
 dist/
+release/
+.stage/
+node_modules/
+*.log
 *.spec
 *.part.mp4
 
@@ -17,7 +20,7 @@ recovery/
 *.m4a
 *.mka
 
-# generated app icons are part of the identity, not build output
-!desktop/build/
-!desktop/build/icon.ico
-!desktop/build/icon.png
+# the app icon ships with the repo, not as build output
+!build/
+!build/icon.ico
+!build/icon.png
