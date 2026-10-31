@@ -76,6 +76,21 @@
   reports **0 open issues**, and all four CI jobs plus SonarCloud are green on
   `374d0ff`. `release\NVIDIA-Fix-1.2.1.exe` (165,400,997 B) was rebuilt from
   this source.
+- Next: publish 1.2.1 with a short README.
+
+### 2026-10-31 — 1.2.1 published: short README, fresh screenshots, release
+
+- Goal: ship the built `.exe` as a GitHub release, show the app in the README,
+  and cut the README down to something a new user can read in a minute.
+- Done: rebuilt screenshots from the real window (`npm run smoke -- --shot`,
+  home + the real Arc Raiders recovery: lost 1:54.03 / recovered 3:05.98 /
+  0 decode errors), rewrote `README.md` from 344 lines to 69 (download button,
+  two screenshots, three steps, honesty note, build commands, license), and
+  published release **v1.2.1** with `NVIDIA-Fix-1.2.1.exe` plus both
+  screenshots as assets.
+- Verified: release is Latest with three assets (exe 165,400,997 B, home.png,
+  result.png); README and screenshots pushed in `d504247`; smoke outputs were
+  deleted afterward, the input recording was never modified.
 - Next: nothing in flight.
 
 ### 2026-10-31 — SonarCloud cleanup resumed: verification + one real bug
