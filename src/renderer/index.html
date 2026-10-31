@@ -24,8 +24,8 @@
       font: 400 16px/1.45 Barlow, Bahnschrift, "DIN Alternate", "Segoe UI", system-ui, sans-serif;
       font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
     }
-    .wrap { height: 100vh; max-width: 1184px; margin: 0 auto; padding: 24px 56px 40px; display: flex; flex-direction: column; }
-    header { display: flex; justify-content: space-between; align-items: center; height: 32px; flex: none; color: var(--d); font-size: 14px; }
+    .wrap { height: 100vh; max-width: 1184px; margin: 0 auto; padding: 12px 48px 16px; display: flex; flex-direction: column; }
+    header { display: flex; justify-content: space-between; align-items: center; height: 28px; flex: none; color: var(--d); font-size: 14px; }
     .brand { display: flex; align-items: center; gap: 10px; color: var(--t); font-weight: 600; font-size: 17px; }
     .mark { width: 22px; height: 22px; background: var(--g); clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%); }
     main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.2fr; gap: 56px; align-items: center; }
@@ -107,38 +107,40 @@
     .check { display: flex; align-items: center; gap: 10px; margin-top: 18px; color: var(--m); cursor: pointer; }
     .check input { width: 18px; height: 18px; accent-color: var(--g); margin: 0; }
     .check span { color: var(--d); }
-    .notice { margin-bottom: 16px; padding: 12px 16px; border-left: 3px solid var(--bad); background: #2a1212; }
+    .notice { margin-bottom: 10px; padding: 10px 14px; font-size: 15px; border-left: 3px solid var(--bad); background: #2a1212; }
     .notice.good { border-color: var(--g); background: #172008; }
     .notice.warn { border-color: var(--warn); background: #2a2308; }
 
     /* result */
-    .chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 16px; color: var(--g); }
+    .chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: var(--g); }
     .chip.warn { color: var(--warn); }
     .chip::before { content: ""; width: 10px; height: 10px; background: currentColor; border-radius: 50%; }
-    .res h1 { font-size: 52px; margin-bottom: 10px; }
-    .res .lede { font-size: 17px; margin-bottom: 24px; max-width: none; overflow-wrap: anywhere; }
-    .res .strip { height: 64px; margin: 0 0 10px; }
+    .res { align-items: start; padding-top: 8px; }
+    .res h1 { font-size: 40px; margin-bottom: 6px; }
+    .res .lede { font-size: 16px; margin-bottom: 12px; max-width: none; overflow-wrap: anywhere; }
+    .res .strip { height: 44px; margin: 0 0 8px; }
     .legend { display: flex; justify-content: space-between; gap: 16px; color: var(--m); font-size: 15px; }
     .legend b { color: var(--t); font-weight: 600; }
-    .stats { display: flex; gap: 48px; margin: 24px 0 8px; }
-    .stat .v2 { font-size: 36px; font-weight: 500; line-height: 1.1; }
+    .stats { display: flex; gap: 48px; margin: 12px 0 4px; }
+    .stat .v2 { font-size: 30px; font-weight: 500; line-height: 1.1; }
     .stat .k { color: var(--m); font-size: 15px; }
     .files { display: grid; gap: 2px; margin-bottom: 8px; }
-    .file { background: var(--p); padding: 14px 18px; }
+    .file { background: var(--p); padding: 10px 16px; }
     .fh { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
     .fh span { color: var(--m); font-weight: 400; }
-    .fn { color: var(--g); margin: 0 0 8px; overflow-wrap: anywhere; line-height: 1.3; }
+    .fn { color: var(--g); margin: 0 0 6px; overflow-wrap: anywhere; line-height: 1.3; }
     .row { display: flex; gap: 8px; }
     .row .path { flex: 1; min-width: 0; padding: 8px 12px; }
     .copy { background: none; border: 1px solid var(--d); color: var(--t); border-radius: 2px; padding: 0 18px; font-weight: 600; min-width: 84px; transition: border-color .15s, color .15s; }
     .copy:hover { border-color: var(--g); color: var(--g); }
-    .fd { color: var(--d); font-size: 13px; margin-top: 6px; }
+    .fd { display: none; }
+    #res-dir { display: none; }
     code { color: var(--m); font-size: .92em; overflow-wrap: anywhere; }
-    details { margin-top: 12px; color: var(--m); font-size: 14px; }
+    details { margin-top: 8px; color: var(--m); font-size: 14px; }
     summary { cursor: pointer; font-weight: 600; color: var(--t); }
     details ul { margin: 8px 0 0; padding-left: 20px; }
     details li { margin: 4px 0; }
-    .caveat { margin: 16px 0 24px; color: var(--m); font-size: 15px; }
+    .caveat { margin: 10px 0 14px; color: var(--m); font-size: 14px; }
 
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   </style>
@@ -225,7 +227,7 @@
           <div class="stat"><div class="v2" id="res-errors"></div><div class="k">Decode errors</div></div>
         </div>
 
-        <details id="res-details" open>
+        <details id="res-details">
           <summary>How it was verified</summary>
           <ul id="res-evidence"></ul>
         </details>
