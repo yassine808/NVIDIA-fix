@@ -2,7 +2,7 @@
 // the Python engine produced, so existing reports and the renderer keep working.
 
 export const TOOL = "nvidia-fix";
-export const VERSION = "1.2.0";
+export const VERSION = "1.2.1";
 
 export const SEEK_OFFSET = 0.005;
 export const CANDIDATE_RUN = 120;

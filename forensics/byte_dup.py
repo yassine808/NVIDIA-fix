@@ -29,15 +29,6 @@ def find_all(hay: bytes, needle: bytes):
         i += 1
 
 
-def sample_times(stts):
-    ts, t = [], 0
-    for cnt, d in stts:
-        for _ in range(cnt):
-            ts.append(t)
-            t += d
-    return ts
-
-
 def collect_probes(r: Reader, intervals):
     """One damaged sample every ~12 s, as (offset, size, sample_index, second)."""
     probes = []
@@ -90,7 +81,6 @@ def main() -> int:
     tracks, _top, _s = load_tracks(VIDEO)
     vtr = next(t for t in tracks if t.get("handler") == "vide")
     intervals = vtr["intervals"]
-    ts = sample_times(vtr["stts"])
 
     r = Reader(VIDEO, window=1 << 20)
     probes = collect_probes(r, intervals)

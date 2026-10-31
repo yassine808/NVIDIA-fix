@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
 
 import type {
   AppInfo,
@@ -37,6 +37,24 @@ interface ActiveRun {
 let active: ActiveRun | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+// Only files this session actually produced may be opened or revealed from the
+// renderer. The set is filled from the engine result, never from IPC input.
+const producedFiles = new Map<string, string>();
+
+function rememberOutputs(result: RecoveryResult): void {
+  for (const entry of result.outputs ?? []) {
+    producedFiles.set(path.resolve(entry.path), entry.path);
+  }
+}
+
+/** A produced file, looked up by an IPC-supplied path instead of trusted from it. */
+function producedFile(raw: unknown): string {
+  const key = typeof raw === "string" ? path.resolve(raw) : "";
+  const stored = key ? producedFiles.get(key) : undefined;
+  if (!stored) throw new Error("That file was not produced by this session.");
+  return stored;
+}
+
 function cleanPath(raw: string): string {
   let text = String(raw ?? "").trim();
   const quote = text.at(0) ?? "";
@@ -47,18 +65,6 @@ function cleanPath(raw: string): string {
   if (lower.startsWith("file:///")) text = text.slice(8);
   else if (lower.startsWith("file://")) text = text.slice(7);
   return text;
-}
-
-/** Resolve a path that must already exist as a regular file. */
-function existingFile(raw: unknown): string {
-  const resolved = path.resolve(String(raw ?? "").trim());
-  try {
-    const real = fs.realpathSync(resolved);
-    if (fs.statSync(real).isFile()) return real;
-  } catch {
-    // fall through to the readable error below
-  }
-  throw new Error(`No file exists at:\n${resolved}`);
 }
 
 function resolveVideo(raw: string): string {
@@ -141,7 +147,7 @@ function runtimePath(): string {
  * PATH decide which executable runs; the bare name stays as a last resort.
  */
 function taskkillPath(): string {
-  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const root = process.env.SystemRoot ?? String.raw`C:\Windows`;
   const absolute = path.join(root, "System32", "taskkill.exe");
   return fs.existsSync(absolute) ? absolute : "taskkill";
 }
@@ -330,6 +336,7 @@ app.whenReady().then(() => {
     async (_event, request: RecoveryRequest): Promise<RecoveryResult> => {
       const result = await runRecovery(request);
       result.outputs = buildOutputs(result);
+      rememberOutputs(result);
       if (result.paths?.video) {
         result.saved_note = `Saved next to the original in ${path.dirname(result.paths.video)}`;
       }
@@ -344,13 +351,18 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("shell:open-path", (_event, target: string): Promise<string> => {
-    // Validate first: IPC input must resolve to a real regular file, and the
-    // path is handed to Electron as data, never interpolated into a shell.
-    return shell.openPath(existingFile(target));
+    // The path is resolved from this session's own output list and handed to
+    // Electron as data; nothing is interpolated into a shell.
+    const known = producedFile(target);
+    return shell.openPath(known); // NOSONAR: values come from producedFiles
   });
 
   ipcMain.handle("shell:show-in-folder", (_event, target: string): void => {
-    if (target) shell.showItemInFolder(existingFile(target));
+    if (target) shell.showItemInFolder(producedFile(target));
+  });
+
+  ipcMain.handle("shell:copy-text", (_event, text: string): void => {
+    clipboard.writeText(typeof text === "string" ? text : "");
   });
 
   createWindow();

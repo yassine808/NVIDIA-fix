@@ -77,29 +77,30 @@ def sample_times(stts):
     return ts
 
 
+def sample_score(r: Reader, off: int, sz: int) -> List[int]:
+    """[parses@0, exact@0, parses@32, exact@32] for one indexed sample."""
+    scores = []
+    for delta in (0, 32):
+        blob = r.read(off + delta, sz)
+        if len(blob) != sz or sz < 8:
+            scores.extend((0, 0))
+            continue
+        n, consumed, _t = nal_chain(blob, max_nals=8)
+        scores.extend((int(n >= 1), int(consumed == sz)))
+    return scores
+
+
 def score_intervals(r: Reader, intervals, ts, timescale: int):
     """Bucket per-10s parse/exact counts at offset 0 and +32."""
     buckets = {}
     for off, sz, si in intervals:
-        blob0 = r.read(off, sz)
-        blob32 = r.read(off + 32, sz)
-        ok0 = ok32 = ex0 = ex32 = 0
-        if len(blob0) == sz and sz >= 8:
-            n, c, _ = nal_chain(blob0, max_nals=8)
-            ok0 = n >= 1
-            ex0 = c == sz
-        if len(blob32) == sz and sz >= 8:
-            n, c, _ = nal_chain(blob32, max_nals=8)
-            ok32 = n >= 1
-            ex32 = c == sz
-        if si < len(ts):
-            b = int((ts[si] / timescale) // 10) * 10
-            acc = buckets.setdefault(b, [0, 0, 0, 0, 0])
-            acc[0] += 1
-            acc[1] += 1 if ok0 else 0
-            acc[2] += 1 if ex0 else 0
-            acc[3] += 1 if ok32 else 0
-            acc[4] += 1 if ex32 else 0
+        if si >= len(ts):
+            continue
+        b = int((ts[si] / timescale) // 10) * 10
+        acc = buckets.setdefault(b, [0, 0, 0, 0, 0])
+        acc[0] += 1
+        for index, value in enumerate(sample_score(r, off, sz), start=1):
+            acc[index] += value
     return buckets
 
 

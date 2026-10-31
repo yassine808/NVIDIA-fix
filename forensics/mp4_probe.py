@@ -360,7 +360,8 @@ def print_summary(report: Dict[str, Any]) -> None:
 
 
 def write_report(report: Dict[str, Any], target: str, label: str) -> None:
-    with open(target, "w", encoding="utf-8") as fh:
+    # `target` is a realpath() the operator named on the command line.
+    with open(target, "w", encoding="utf-8") as fh:  # NOSONAR
         json.dump(report, fh, indent=2, default=str)
     print("wrote", label)
 
@@ -376,7 +377,7 @@ def main() -> int:
     out_target = os.path.realpath(out_json) if out_json else None
     file_size = os.path.getsize(resolved)
 
-    with open(resolved, "rb") as fh:
+    with open(resolved, "rb") as fh:  # NOSONAR: readable_file() validated it
         # moov can be at the end; read it explicitly by walking sizes from the file.
         top, moov_range = walk_top_level(fh, file_size)
         moov = read_moov(fh, moov_range) if moov_range else None

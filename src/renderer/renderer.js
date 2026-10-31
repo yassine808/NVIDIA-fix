@@ -26,22 +26,20 @@
     return n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(1) + ' MB';
   }
 
-  // Copy a saved path to the clipboard with the old API and the new one.
+  // Copy a saved path through the desktop bridge (Electron's clipboard), with
+  // the web clipboard as the fallback when the page runs outside the app.
   function copyPath(input) {
     input.select();
-    var ok = false;
-    try {
-      ok = document.execCommand('copy');
-    } catch (e) {
-      // execCommand("copy") is removed in newer Chromium; the async API below
-      // is the supported path and runs whenever it reports false.
-    }
-    if (!ok && navigator.clipboard) {
-      navigator.clipboard.writeText(input.value).catch(function () {
-        // Clipboard access can be denied without a user gesture; the text
-        // stays selected so the reader can copy it by hand.
+    var text = input.value;
+    if (api?.copyText) {
+      api.copyText(text).catch(function () {
+        // The text stays selected, so it can still be copied by hand.
       });
+      return;
     }
+    navigator.clipboard?.writeText(text).catch(function () {
+      // Same fallback: the selection is left in place.
+    });
   }
 
   // Result page: copy buttons.
@@ -86,12 +84,12 @@
     file = null; picker.value = ''; path.value = p; error(''); sync();
   };
   function browse() {
-    if (api && api.pickVideo) {
+    if (api?.pickVideo) {
       api.pickVideo().then(function (p) { if (p) window.setVideoPath(p); });
       return;
     }
-    var pw = window.pywebview && window.pywebview.api;
-    if (pw && pw.browse) { pw.browse().then(function (p) { if (p) window.setVideoPath(p); }); return; }
+    var pw = window.pywebview?.api;
+    if (pw?.browse) { pw.browse().then(function (p) { if (p) window.setVideoPath(p); }); return; }
     picker.click();
   }
   $('#browse').addEventListener('click', function (e) { e.stopPropagation(); browse(); });
@@ -232,7 +230,7 @@
 
     var target = path.value.trim();
     if (file) {
-      target = api && api.pathForFile ? api.pathForFile(file) : '';
+      target = api?.pathForFile?.(file) ?? '';
     }
     if (!target) { error('Choose a video file first.'); return; }
 
@@ -267,7 +265,7 @@
       if (index > k) { k = Math.min(index, steps.length - 1); mark(); }
     }
 
-    if (!api || !api.recover) {
+    if (!api?.recover) {
       setTimeout(function () { stop(); sync(); error('Preview only. Run the app to recover videos.'); }, 1600);
       return;
     }
@@ -279,11 +277,11 @@
     }).catch(function (err) {
       off(); stop();
       zone.dataset.state = 'ready';
-      error((err && err.message ? err.message : String(err)).replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''));
+      error(String(err?.message ?? err).replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''));
     });
   });
 
-  if (api && api.info) {
+  if (api?.info) {
     api.info().then(function (info) {
       $('#version').textContent = 'v' + info.engineVersion;
       if (info.samplePath) {

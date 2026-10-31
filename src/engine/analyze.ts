@@ -90,6 +90,10 @@ export function analysisToDict(analysis: Analysis): Json {
   const video = analysis.media.video;
   const audio = analysis.media.audio;
   const boundary = analysis.candidates[0] ?? null;
+  let warning: string | null = null;
+  if (!isHealthy(analysis)) {
+    warning = caveatFor(boundary ? boundary.pts : 0);
+  }
   return {
     tool: TOOL,
     version: VERSION,
@@ -123,7 +127,7 @@ export function analysisToDict(analysis: Analysis): Json {
       flags: candidate.flags,
       nal_type: candidate.nalType,
     })),
-    warning: isHealthy(analysis) ? null : caveatFor(boundary ? boundary.pts : 0),
+    warning,
   };
 }
 

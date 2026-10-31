@@ -19,7 +19,7 @@ function searchDirectories(): string[] {
   if (programFiles) dirs.push(path.join(programFiles, "ffmpeg", "bin"));
   if (programFilesX86) dirs.push(path.join(programFilesX86, "ffmpeg", "bin"));
   dirs.push(...(process.env.PATH ?? "").split(path.delimiter));
-  return dirs.filter((dir) => Boolean(dir));
+  return dirs.filter(Boolean);
 }
 
 function which(name: string): string | null {
@@ -39,7 +39,7 @@ function which(name: string): string | null {
 
 /** The PowerShell that ships with Windows, or the bare name as a fallback. */
 function powershellPath(): string {
-  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const root = process.env.SystemRoot ?? String.raw`C:\Windows`;
   const absolute = path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   return fs.existsSync(absolute) ? absolute : "powershell";
 }

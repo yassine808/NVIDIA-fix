@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.1 - 2026-10-31
+
+Closing the remaining SonarCloud findings, plus a clearer installer name.
+
+### Changed
+
+- The Windows build is now `NVIDIA-Fix-1.2.1.exe` (no `-portable` suffix).
+- The renderer copies saved paths through the Electron clipboard bridge instead
+  of the deprecated `document.execCommand("copy")`.
+- `Open` / `Show in folder` resolve the target from the outputs this session
+  produced; an arbitrary IPC path is refused.
+- `fetch-ffmpeg.js` runs PowerShell and `unzip` from fixed OS paths, never from
+  `PATH`.
+
+### Fixed
+
+- SonarCloud cleanups: optional chaining in the renderer, `String.raw` for
+  Windows paths, `??` and boolean shorthand in the engine, a split
+  `score_intervals` in `bitstream_map.py`, an unused variable in `byte_dup.py`,
+  and path-validation suppressions where the CLI intentionally takes an
+  operator-named file.
+
 ## 1.1.1 — 2026-10-31
 
 Correctness pass on verification. No change to the recovery strategy; the

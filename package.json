@@ -1,6 +1,6 @@
 {
   "name": "nvidia-fix",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Fix corrupted NVIDIA ShadowPlay / Instant Replay recordings: recover the clean tail without re-encoding, and see exactly what was destroyed",
   "main": "dist/main/main.js",
@@ -54,7 +54,7 @@
       "icon": "build/icon.ico"
     },
     "portable": {
-      "artifactName": "NVIDIA-Fix-${version}-portable.exe"
+      "artifactName": "NVIDIA-Fix-${version}.exe"
     }
   }
 }

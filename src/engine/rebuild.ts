@@ -61,11 +61,13 @@ export function planToDict(plan: FullLengthPlan): Json {
   };
 }
 
+// A single backslash, written without an escaped literal so no regex or
+// double-escaped string is needed (String.raw cannot close on one).
+const BACKSLASH = String.fromCharCode(92);
+
 /** A concat-demuxer line that survives spaces, quotes and Windows paths. */
 export function concatEntry(target: string): string {
-  // A single backslash cannot be written with String.raw (it would escape the
-  // closing backtick), so keep the escaped JS literal and use replaceAll.
-  const text = target.replaceAll("\\", "/").replaceAll("'", "'\\''");
+  const text = target.replaceAll(BACKSLASH, "/").replaceAll("'", `'${BACKSLASH}''`);
   return `file '${text}'`;
 }
 

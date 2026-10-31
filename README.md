@@ -264,7 +264,7 @@ npm run dist
 
 `npm run dist` downloads the latest ffmpeg build if needed, compiles the
 TypeScript app, stages the engine plus that portable ffmpeg, and runs
-electron-builder, producing `release\NVIDIA-Fix-1.2.0-portable.exe`. The
+electron-builder, producing `release\NVIDIA-Fix-1.2.1.exe`. The
 installer carries its own `ffmpeg.exe`/`ffprobe.exe`, so the target machine
 needs nothing installed.
 

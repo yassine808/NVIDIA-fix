@@ -25,6 +25,9 @@ const api: DesktopApi = {
   showInFolder: (target: string) =>
     ipcRenderer.invoke("shell:show-in-folder", target) as Promise<void>,
 
+  copyText: (text: string) =>
+    ipcRenderer.invoke("shell:copy-text", text) as Promise<void>,
+
   onProgress: (listener: (message: string) => void) => {
     const handler = (_event: unknown, message: string) => listener(message);
     ipcRenderer.on("recovery:progress", handler);

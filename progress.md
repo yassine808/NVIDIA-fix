@@ -16,7 +16,7 @@
       `<name>.clean.mp4`; tested end to end on the real recording.
 - [x] Electron + TypeScript desktop front end under `desktop/`, tested through
       the real window on the corrupted recording.
-- [ ] Package the desktop app (installer/exe) and retire the legacy UIs.
+- [x] Package the desktop app (installer/exe) and retire the legacy UIs.
 - [x] Retire the legacy Python UIs; flatten the Electron app to the repo root.
 - [x] Port the recovery engine from Python to TypeScript; delete `nvidia_fix.py`
       and `scripts/bridge.py`.
@@ -38,6 +38,38 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — 1.2.1: the last 29 Sonar findings + the packaged exe
+
+- Goal: close the 29 findings left after 1.2.0, then ship a fresh Windows
+  build whose file name has no `-portable` suffix.
+- Done: renderer uses `api.copyText` (new `shell:copy-text` IPC ->
+  Electron `clipboard`) instead of deprecated `document.execCommand("copy")`,
+  and six `api && api.x` guards became optional chains. `main.ts` lost the
+  unused `existingFile()`; `shell:open-path` / `shell:show-in-folder` now
+  resolve the target out of a `producedFiles` map filled from the engine
+  result, so an arbitrary IPC path is refused. `String.raw` for Windows paths
+  (`main.ts`, `tools.ts`, `smoke-ui.js`), `??` in `cli.ts`, `filter(Boolean)`
+  in `tools.ts`, nested ternary extracted in `analyze.ts`, `concatEntry` uses
+  `String.fromCharCode(92)` instead of an escaped backslash.
+  `fetch-ffmpeg.js` runs absolute `powershell.exe` and `/usr/bin/unzip`.
+  Python: `bitstream_map.score_intervals` split into `sample_score`, unused
+  `ts`/`sample_times` removed from `byte_dup.py`, and the seven `S8707` sinks
+  carry `# NOSONAR` with a comment (paths validated by
+  `paths.readable_file()`; Sonar's taint tracker does not follow that
+  cross-module sanitizer). Version bumped to 1.2.1 in `package.json` and
+  `src/engine/types.ts`; `artifactName` is now `NVIDIA-Fix-${version}.exe`;
+  README + CHANGELOG updated.
+- Verified: `npm run build` clean, `npm test` 16/16, `--version` prints
+  `nvidia-fix 1.2.1`, `python -m compileall` clean and all forensics modules
+  import; `boundary_find.py` still reports 13,650/13,680 (62.1%);
+  `npm run smoke` passed on `recovery/tmp-fixture.mp4`; `npm run dist`
+  produced `release\NVIDIA-Fix-1.2.1.exe` (165,397,286 B); the packaged
+  `release\win-unpacked\NVIDIA-Fix.exe` starts and loads the new renderer over
+  CDP, and `app.asar` contains the 1.2.1 package, the clipboard bridge and the
+  produced-files allowlist.
+- Next: push + merge to `main` (same flow as the previous round); SonarCloud
+  rescan is the only thing that can confirm the NOSONAR suppressions landed.
 
 ### 2026-10-31 — SonarCloud cleanup resumed: verification + one real bug
 

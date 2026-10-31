@@ -77,5 +77,6 @@ export interface DesktopApi {
   cancel(): Promise<boolean>;
   openPath(target: string): Promise<string>;
   showInFolder(target: string): Promise<void>;
+  copyText(text: string): Promise<void>;
   onProgress(listener: (message: string) => void): () => void;
 }

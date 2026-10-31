@@ -17,7 +17,7 @@ const PORT = 9333;
 // Absolute path: the system directory is fixed and not writable by a standard
 // user, unlike whatever PATH happens to point at. SystemRoot is the OS's own
 // answer for the Windows drive, with the conventional location as fallback.
-const TASKKILL = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+const TASKKILL = path.join(process.env.SystemRoot ?? String.raw`C:\Windows`, "System32", "taskkill.exe");
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);

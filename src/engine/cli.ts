@@ -86,8 +86,7 @@ function printExplain(result: Json): void {
 function text(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
-  const encoded = JSON.stringify(value);
-  return encoded === undefined ? String(value) : encoded;
+  return JSON.stringify(value) ?? String(value);
 }
 
 function printFixResult(result: Json, fullLengthRequested: boolean): void {

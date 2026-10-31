@@ -16,7 +16,8 @@ FRAME = W * H
 
 
 def load(path):
-    data = open(path, "rb").read()
+    # Callers pass paths.readable_file() output.
+    data = open(path, "rb").read()  # NOSONAR
     n = len(data) // FRAME
     return [data[i * FRAME:(i + 1) * FRAME] for i in range(n)]
 

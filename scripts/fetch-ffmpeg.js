@@ -84,16 +84,26 @@ async function download(url, target) {
   });
 }
 
+// Absolute, OS-owned tools only: never let PATH decide which binary runs.
+const POWERSHELL = path.join(
+  process.env.SystemRoot ?? String.raw`C:\Windows`,
+  "System32",
+  "WindowsPowerShell",
+  "v1.0",
+  "powershell.exe"
+);
+const UNZIP = "/usr/bin/unzip";
+
 function unzip(zip, into) {
   if (process.platform === "win32") {
     execFileSync(
-      "powershell",
+      POWERSHELL,
       ["-NoProfile", "-NonInteractive", "-Command", `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${into}' -Force`],
       { stdio: "inherit" }
     );
     return;
   }
-  execFileSync("unzip", ["-q", zip, "-d", into], { stdio: "inherit" });
+  execFileSync(UNZIP, ["-q", zip, "-d", into], { stdio: "inherit" });
 }
 
 async function main() {

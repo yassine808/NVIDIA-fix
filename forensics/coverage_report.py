@@ -12,7 +12,8 @@ def main() -> int:
     path = sys.argv[1] if len(sys.argv) > 1 else r"recovery/probe.json"
     # The operator names an explicit local file on the command line; resolve it
     # once so the read below uses the validated path.
-    d = json.load(open(readable_file(path, "probe json"), encoding="utf-8"))
+    target = readable_file(path, "probe json")
+    d = json.load(open(target, encoding="utf-8"))  # NOSONAR: validated above
     mdat = next(b for b in d["top_level"] if b["type"] == "mdat")
     mstart, mend = mdat["start"] + 8, mdat["start"] + mdat["size"]
     print("file      %d bytes" % d["size"])
