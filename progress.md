@@ -68,8 +68,15 @@
   `release\win-unpacked\NVIDIA-Fix.exe` starts and loads the new renderer over
   CDP, and `app.asar` contains the 1.2.1 package, the clipboard bridge and the
   produced-files allowlist.
-- Next: push + merge to `main` (same flow as the previous round); SonarCloud
-  rescan is the only thing that can confirm the NOSONAR suppressions landed.
+- Pushed to `main` as `0a9b582`; SonarCloud failed the gate with 5 issues: two
+  `S7632` (text after `# NOSONAR` is invalid) leaving the `S8707` open in
+  `coverage_report.py` and `mp4_probe.py`, plus `S7758` (`fromCharCode`).
+  Fixed both in `374d0ff` (bare `# NOSONAR`, `String.fromCodePoint`).
+- Verified after the rescan: SonarCloud analysis **success**, the project API
+  reports **0 open issues**, and all four CI jobs plus SonarCloud are green on
+  `374d0ff`. `release\NVIDIA-Fix-1.2.1.exe` (165,400,997 B) was rebuilt from
+  this source.
+- Next: nothing in flight.
 
 ### 2026-10-31 — SonarCloud cleanup resumed: verification + one real bug
 
