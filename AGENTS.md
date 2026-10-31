@@ -26,8 +26,9 @@ update **Mission log** before you stop working.
 | `recovery/tools/ff/` | Portable ffmpeg/ffprobe 9.0.2 used for decode + stream copy. |
 | `forensics/` | Tracked, no-dependency analysis tools. Run with `PYTHONPATH=forensics`. |
 | `nvidia_fix.py` | Recovery engine + CLI (what the app runs). |
-| `desktop.py` | Tkinter desktop app. |
-| `app.py`, `templates/` | Optional Flask UI. |
+| `desktop.py` | Tkinter desktop app (legacy). |
+| `desktop/` | Electron + TypeScript desktop app (new front end). |
+| `app.py`, `templates/` | Optional Flask UI (legacy). |
 | `tests/` | Unit + real-file tests. |
 
 Forensics entry points:
@@ -163,6 +164,38 @@ not file damage), no unclassified output, no retry attempts needed.
       to be published as the original opening (see session 4 log).
 
 ## Mission log
+
+### 2026-10-31 — session 6b: desktop uses Yassine's supplied frontend
+
+- Replaced the custom renderer with the supplied HTML/CSS/JS verbatim in design:
+  inline CSS, drop zone, path field, steps, tick strip, result page. Only the
+  integration points changed (Electron IPC instead of Flask POST/pywebview).
+- Removed `renderer.ts`, `styles.css`, `tsconfig.renderer.json`; build is one
+  `tsc` pass plus asset copy. README updated.
+- Re-ran `npm run build` and `npm run smoke` on a synthetic corrupted clip and
+  the real `recovery/Arc_Raiders corrupted.mp4`; both passed (real: lost
+  1:54.03, recovered 3:05.98, 0 decode errors). Duplicate `clean-2` outputs
+  removed. Branch still uncommitted.
+
+### 2026-10-31 — session 6: Electron + TypeScript desktop app on `desktop-typescript`
+
+- New front end under `desktop/`: Electron 45 + TypeScript 5.9, no bundler.
+  Main process owns the window/IPC and spawns `scripts/bridge.py`, which runs
+  `nvidia_fix.process(out_dir=None)` and streams progress as JSON lines.
+  Renderer is sandboxed (`contextIsolation`, `nodeIntegration: false`) and talks
+  only through a narrow `contextBridge` API.
+- UX: Browse dialog, drag-and-drop, path paste, live progress, cancel (kills the
+  Python/ffmpeg tree), and per-output Open / Show in folder / Copy. Result page
+  mirrors the web verification numbers. Outputs stay `<name>.clean.mp4` etc.
+  beside the input.
+- Verified: `npm run typecheck` and `npm run build` clean. End-to-end
+  `npm run smoke` (real Electron window driven over CDP) on a synthetic clip and
+  on `recovery/Arc_Raiders corrupted.mp4`: `status: success`, clean start
+  114.031811 s, 185.981 s / 22,318 packets, **0 decode errors**, files written
+  beside the input. Temporary duplicate outputs deleted afterwards.
+- Note: the branch is not pushed. The legacy Tkinter and Flask UIs remain for
+  reference and were not deleted.
+
 
 ### 2026-10-31 — session 5: path-based web UI shipped and tested on the real file
 

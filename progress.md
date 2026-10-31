@@ -14,6 +14,9 @@
 - [x] Full-length deliverable built and verified (see the log entry below).
 - [x] Path-based web UI: paste a video path, outputs saved beside it as
       `<name>.clean.mp4`; tested end to end on the real recording.
+- [x] Electron + TypeScript desktop front end under `desktop/`, tested through
+      the real window on the corrupted recording.
+- [ ] Package the desktop app (installer/exe) and retire the legacy UIs.
 - [ ] 100% of the *original* opening: impossible from every local source.
 
 ## Environment rules
@@ -22,6 +25,40 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — desktop uses Yassine's supplied frontend
+
+- Goal: replace the custom renderer with the exact HTML/CSS/JS design Yassine
+  supplied (NVIDIA green, drop zone, steps, tick strip, result page).
+- Done: `desktop/src/renderer/index.html` is now that single file with inline
+  CSS/JS, adapted only at the integration points: `window.nvidiaFix` replaces
+  the Flask POST/`pywebview` calls, Browse uses the Electron dialog, dropped
+  files resolve to real paths, and the result section is filled from the engine
+  JSON instead of Jinja. Removed `renderer.ts`, `styles.css` and
+  `tsconfig.renderer.json`; `npm run build` is one `tsc` pass plus `copy-assets`.
+  README architecture updated.
+- Verified: `npm run build` clean. `npm run smoke` passed on a synthetic
+  corrupted clip (lost 0.5 s / recovered 11.5 s, 6 damaged samples, 0 decode
+  errors) and on `recovery/Arc_Raiders corrupted.mp4` (lost 1:54.03, recovered
+  3:05.98, 11,000 damaged samples, 0 decode errors). Created `clean-2` outputs
+  were deleted afterward; no source files touched.
+- Next: review the diff, then decide on packaging and retiring the legacy UIs.
+
+### 2026-10-31 — Electron + TypeScript desktop app (branch `desktop-typescript`)
+
+- Goal: switch the app from the Flask web UI to a TypeScript desktop app.
+- Done: new `desktop/` app (Electron 45 + TypeScript 5.9). Main process spawns
+  `scripts/bridge.py`, which streams `nvidia_fix.process` progress as JSON lines.
+  Sandboxed renderer with a `contextBridge` API; Browse dialog, drag-and-drop,
+  live log, cancel, and Open / Show in folder / Copy for each output. Outputs
+  remain `<name>.clean.mp4` beside the input. Legacy Tkinter/Flask UIs kept.
+- Verified: `npm run typecheck` + `npm run build` clean. `npm run smoke` drives
+  the real Electron window over CDP: synthetic clip passed; the real recording
+  passed with clean start 114.031811 s, 185.981 s / 22,318 packets, 0 decode
+  errors. Temporary duplicate outputs removed.
+- Next: review the branch, then decide whether to delete the legacy UIs and
+  package the Electron app.
+
 
 ### 2026-10-31 — path-based web UI, tested on the real recording
 

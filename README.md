@@ -130,6 +130,28 @@ The desktop app needs Python 3.9+. ffmpeg/ffprobe are found on `PATH` when
 installed, otherwise the portable build in `recovery/tools/ff/` is used. Flask
 is only needed for the optional web UI.
 
+## TypeScript desktop app (`desktop/`)
+
+The new native front end is Electron + TypeScript and replaces the Flask web UI.
+It asks for one path, runs the same Python engine, and writes the outputs beside
+the original.
+
+```powershell
+cd desktop
+npm install
+npm start
+```
+
+Supported actions: **Browse files**, drag-and-drop, or paste a path; live
+progress; and a copyable path for every output. The renderer is sandboxed and
+has no Node access; the main process spawns `scripts/bridge.py`, which streams
+progress as JSON lines.
+
+Output names are `‹name›.clean.mp4`, `‹name›.clean.audio.m4a` and
+`‹name›.clean.report.json`, all next to the input. See
+[`desktop/README.md`](desktop/README.md) for the smoke test
+(`npm run smoke -- --path ...`) and architecture.
+
 ## CLI
 
 ```powershell
@@ -346,8 +368,9 @@ no clean keyframe exists.
 | Path | Purpose |
 | --- | --- |
 | `nvidia_fix.py` | Recovery engine, JSON report, CLI |
-| `desktop.py` | Native Tkinter desktop app |
-| `app.py` | Optional Flask web UI |
+| `desktop.py` | Native Tkinter desktop app (legacy) |
+| `desktop/` | Electron + TypeScript desktop app (new front end) |
+| `app.py` | Optional Flask web UI (legacy) |
 | `tests/` | Unit, integration, desktop, and real-file tests |
 | `scripts/` | CI fixture and end-to-end CLI check |
 | `docs/screenshots/` | README screenshots |

@@ -1,0 +1,18 @@
+{
+  "name": "nvidia-fix-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop front end for the NVIDIA-Fix recovery engine",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && electron .",
+    "smoke": "node scripts/smoke-ui.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "electron": "^45.2.1",
+    "typescript": "^5.9.3"
+  }
+}
