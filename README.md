@@ -71,10 +71,18 @@ For an input named `clip.mp4`:
 | --- | --- |
 | `clip.clean.mp4` | Video stream-copied from the first clean IDR, plus the original audio |
 | `clip.clean.audio.m4a` | Audio from before the cut, so the early sound is not lost |
+| `clip.clean.full-length.mp4` | Optional complete-length rebuild: the copied opening, then the clean tail, with the original audio for the whole timeline |
 | `clip.clean.report.json` | Boundary timestamps, sample counts, packet SHA-256, decode results |
 
 Existing files are never overwritten. A second run produces `clip.clean-2.mp4`,
 and so on. The input is opened read-only.
+
+The full-length rebuild is only written when a duplication map sits next to the
+input (see `explain` below), because that map is what proves which later footage
+the recorder wrote over the head. Its opening **repeats** footage from later in
+the same recording — same session, real frames, wrong position on the timeline.
+It is a rebuild, never the lost original opening, and both the report and the app
+label it that way.
 
 ## Desktop app (Windows)
 
@@ -100,12 +108,15 @@ from the latest release and double-click it.
 
 1. Choose the corrupted recording.
 2. Choose where the recovered files should go (defaults to the source folder).
-3. Click **Recover clean tail**.
-4. When it finishes, use **Play video**, **Open folder**, or **Report**.
+3. Leave **Also rebuild the full length** ticked if you want the complete-length
+   rebuild as well (it needs a duplication map beside the input).
+4. Click **Recover clean tail**.
+5. When it finishes, use **Play video**, **Open folder**, or **Report**.
 
 The app shows the damage boundary, the recovered duration, packet count, decode
 errors, and a lost/recovered timeline. Recovery runs in a background thread; the
-window stays responsive.
+window stays responsive. When the rebuild exists, the result card also shows its
+duration, its frame count, and which part of the timeline its opening repeats.
 
 ### Run from source
 
@@ -129,6 +140,9 @@ python nvidia_fix.py fix "D:\Videos\clip.mp4"
 
 # choose an output directory / skip the full decode (faster)
 python nvidia_fix.py fix "D:\Videos\clip.mp4" --out "D:\Recovered" --no-full-decode
+
+# also rebuild the complete length (copied opening + clean tail + original audio)
+python nvidia_fix.py fix "D:\Videos\clip.mp4" --full-length
 
 # machine-readable output
 python nvidia_fix.py analyze "D:\Videos\clip.mp4" --json
@@ -174,6 +188,18 @@ The detector and cut were validated against a 439,194,252-byte ShadowPlay DVR:
 - Full decode: **0 errors**
 - Original, `fixed.mp4`, and recovered files were hash-checked; the input was
   never modified
+
+The full-length rebuild of the same recording (`--full-length`, or the checkbox
+in the desktop app) measures:
+
+- Video **300.008622 s / 35,999 frames**, audio **300.010250 s / 14,062 frames**
+  (the original frame count)
+- Fills **114.032 s** of the missing opening with footage from
+  **182.540–296.572 s** of the same recording — the window the recorder copied
+  over the head — then the untouched tail from 114.031811 s
+- Full decode at below-normal priority: **0 H.264 errors, 0 AAC errors**
+- Its output is labelled a rebuild everywhere: filename, report
+  `full_length.caveat`, CLI line, and the app's result card
 
 The early video in that file was overwritten by a drifting copy of later
 footage, then replaced by high-entropy garbage with no recoverable reference

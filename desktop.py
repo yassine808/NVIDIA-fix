@@ -89,6 +89,7 @@ class DesktopApp:
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar()
+        self.full_length_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="Choose a corrupted recording to begin.")
         self.stage_var = tk.StringVar(value="READY")
         self.stat_clean = tk.StringVar(value="—")
@@ -301,6 +302,41 @@ class DesktopApp:
             font=FONT_HINT,
             anchor="w",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(5, 0))
+
+        self.full_length_check = tk.Checkbutton(
+            inner,
+            text=(
+                "Also rebuild the full length: copied opening + clean tail + "
+                "all original audio"
+            ),
+            variable=self.full_length_var,
+            bg=PANEL,
+            fg=TEXT,
+            activebackground=PANEL,
+            activeforeground=ACCENT,
+            selectcolor=ENTRY_BG,
+            font=FONT_SM,
+            anchor="w",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.full_length_check.grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=(9, 0)
+        )
+        tk.Label(
+            inner,
+            text=(
+                "The rebuilt opening repeats footage from later in the same "
+                "recording. It is not the lost original frames."
+            ),
+            bg=PANEL,
+            fg=MUTED_DIM,
+            font=FONT_HINT,
+            anchor="w",
+            justify="left",
+            wraplength=780,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(1, 0))
 
         self.start_btn = tk.Button(
             content,
@@ -543,6 +579,23 @@ class DesktopApp:
             wraplength=760,
         ).pack(side="left", fill="x", padx=(10, 0))
 
+        self.full_length_row = tk.Frame(inner, bg=PANEL_2)
+        self.full_length_label = tk.Label(
+            self.full_length_row,
+            text="",
+            bg=PANEL_2,
+            fg=ACCENT,
+            font=FONT_HINT,
+            anchor="w",
+            justify="left",
+            wraplength=620,
+        )
+        self.full_length_label.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self.full_length_btn = self._secondary_button(
+            self.full_length_row, "Play full-length", self._play_full_length
+        )
+        self.full_length_btn.pack(side="right", padx=(10, 10))
+
     def _stat_box(self, parent, col, label, variable):
         box = tk.Frame(parent, bg=PANEL_2)
         box.grid(
@@ -647,6 +700,10 @@ class DesktopApp:
         self.output_btn.config(state="normal" if enabled else "disabled")
         self.input_entry.config(state="readonly" if enabled else "disabled")
         self.output_entry.config(state="normal" if enabled else "disabled")
+        self.full_length_check.config(
+            state="normal" if enabled else "disabled",
+            cursor="hand2" if enabled else "arrow",
+        )
 
         has_input = bool(self.input_var.get().strip())
         if enabled and has_input:
@@ -673,6 +730,8 @@ class DesktopApp:
 
     def _hide_result(self) -> None:
         self.result_card.pack_forget()
+        if hasattr(self, "full_length_row"):
+            self.full_length_row.pack_forget()
         self.result = None
         self.timeline_data = None
         if hasattr(self, "timeline_canvas"):
@@ -826,6 +885,7 @@ class DesktopApp:
                 out_dir=output_dir,
                 full_decode=True,
                 progress=progress,
+                full_length=self.full_length_var.get(),
             )
         except Exception as exc:  # surface any failure to the UI
             self.events.put(("error", str(exc) or exc.__class__.__name__))
@@ -903,6 +963,8 @@ class DesktopApp:
             )
             self._set_stage("COMPLETE", GOOD)
 
+        self._show_full_length(result.get("full_length") or {})
+
         clean_start = float(corruption.get("clean_start_seconds") or 0)
         duration = float(video.get("duration_seconds") or 0)
         source_total = float((result.get("media") or {}).get("duration_seconds") or 0)
@@ -922,6 +984,40 @@ class DesktopApp:
         if self.test_mode and self.auto_start:
             self._closed = True
             self.root.after(50, self.root.destroy)
+
+    def _show_full_length(self, info: dict) -> None:
+        """Say exactly what the rebuild is, and offer it only when it exists."""
+        paths = (self.result or {}).get("paths") or {}
+        if paths.get("full_length") and info.get("video_duration_seconds"):
+            frames = int(info.get("video_frames") or 0)
+            filled = float(info.get("filled_seconds") or 0)
+            errors = int(info.get("decode_errors") or 0)
+            if info.get("decode_checked") is False:
+                verdict_text = "decode not checked"
+            else:
+                verdict_text = "0 decode errors" if not errors else \
+                    f"{errors} decode error line(s)"
+            self.full_length_label.config(
+                fg=GOOD if not errors and info.get("decode_checked") is not False else ACCENT,
+                text=(
+                    f"FULL-LENGTH REBUILD  {_timecode(info.get('video_duration_seconds'))}"
+                    f"  ·  {frames:,} frames  ·  the first {filled:.1f} s repeats "
+                    f"footage from {_timecode(info.get('timeline_start_seconds'))}"
+                    f"–{_timecode(info.get('timeline_end_seconds'))}  ·  audio is the "
+                    "original track  ·  " + verdict_text + ".  Not the original opening."
+                ),
+            )
+            self.full_length_btn.config(state="normal", cursor="hand2")
+            self.full_length_row.pack(fill="x", pady=(8, 0))
+            return
+
+        self.full_length_btn.config(state="disabled", cursor="arrow")
+        reason = info.get("skipped") or info.get("error")
+        if reason:
+            self.full_length_label.config(
+                fg=MUTED, text=f"Full-length rebuild not built: {reason}"
+            )
+            self.full_length_row.pack(fill="x", pady=(8, 0))
 
     def _on_failure(self, message: str) -> None:
         self._finish_busy()
@@ -965,6 +1061,10 @@ class DesktopApp:
 
     def _play_video(self) -> None:
         self._open_path(self._video_file())
+
+    def _play_full_length(self) -> None:
+        if self.result:
+            self._open_path(self.result["paths"].get("full_length"))
 
     def _open_report(self) -> None:
         if self.result:

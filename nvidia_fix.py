@@ -12,6 +12,12 @@ This tool finds the last invalid sample, picks the first clean IDR after it,
 verifies that the cut starts on the exact packet, stream-copies the tail, and
 exports the audio that precedes the cut.
 
+When the overwrite copied a later stretch of the same recording over the head,
+`process(..., full_length=True)` can also rebuild a complete-length file: the
+copy window fills the missing opening, the clean tail follows, and the original
+audio (which survives intact) is muxed over both.  That rebuild repeats footage
+— it is real material from the same session, not the original opening frames.
+
 It cannot reconstruct video that was overwritten.  Be honest about that.
 
 Requires ffmpeg and ffprobe on PATH (or FFMPEG_BINARY / FFPROBE_BINARY).
@@ -26,12 +32,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 TOOL = "nvidia-fix"
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
 FFPROBE = os.environ.get("FFPROBE_BINARY", "ffprobe")
@@ -42,11 +49,25 @@ MIN_RUN = 30                 # ...but accept shorter runs near EOF
 DECODE_VALIDATE_SECONDS = 2  # decode check on the produced tail
 SUPPORTED_VIDEO_CODECS = {"h264"}
 SUPPORTED_SUFFIXES = {".mp4", ".mov", ".m4v"}
+FULL_LENGTH_SUFFIX = ".full-length.mp4"
+MIN_FULL_LENGTH_SECONDS = 1.0  # below this a rebuild is not worth a 400 MB file
+
+# Yassine games on this machine, so long ffmpeg runs must never compete for CPU.
+_CREATION_FLAGS = (
+    getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0) if os.name == "nt" else 0
+)
 
 CAVEAT = (
     "Only the footage from clean_start onward is recoverable. Earlier video "
     "was overwritten in place by the recorder and cannot be reconstructed from "
     "this file. Audio before clean_start is exported separately."
+)
+
+FULL_LENGTH_CAVEAT = (
+    "This is a rebuild, not the original recording. The opening shows footage "
+    "the recorder wrote over the head — real frames from later in the same "
+    "session — so it repeats material you also see near the end. The audio is "
+    "the original track for the whole length."
 )
 
 
@@ -164,6 +185,7 @@ def _run(cmd: Sequence[str], check: bool = True, timeout: int = 600) -> subproce
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            creationflags=_CREATION_FLAGS,
         )
     except FileNotFoundError as exc:
         raise NvidiaFixError(
@@ -578,7 +600,7 @@ def _unique_base(out_dir: Path, stem: str, audio_ext: str) -> str:
     base = f"{stem}.clean"
     index = 1
     while any((out_dir / f"{base}{ext}").exists() for ext in
-              (".mp4", f".audio{audio_ext}", ".report.json")):
+              (".mp4", f".audio{audio_ext}", ".report.json", FULL_LENGTH_SUFFIX)):
         index += 1
         base = f"{stem}.clean-{index}"
     return base
@@ -722,6 +744,196 @@ def _probe_duration(path: Path) -> float:
 
 
 # --------------------------------------------------------------------------
+# full-length rebuild
+# --------------------------------------------------------------------------
+
+@dataclass
+class FullLengthPlan:
+    """Where the copy window lands when the missing opening is filled back in.
+
+    The recorder wrote a later stretch of the same stream over the head of the
+    file, so that stretch can be cut cleanly out of the tail and placed at the
+    start. Those are real frames from the same session — the same information
+    the corrupted head already carries, only correctly framed — so the result
+    repeats footage rather than inventing any.
+    """
+
+    start_in_tail: float     # seconds into the recovered tail where the copy begins
+    duration: float          # seconds of the missing timeline this footage fills
+    needed: float            # seconds missing before the first clean keyframe
+    available: float         # seconds of copied material the map actually found
+    timeline_start: float    # where that footage originally sat, in source seconds
+    timeline_end: float
+
+    @property
+    def shortfall(self) -> float:
+        return max(0.0, self.needed - self.duration)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "filled_seconds": _t(self.duration),
+            "start_in_tail_seconds": _t(self.start_in_tail),
+            "timeline_start_seconds": _t(self.timeline_start),
+            "timeline_end_seconds": _t(self.timeline_end),
+            "needed_seconds": _t(self.needed),
+            "available_seconds": _t(self.available),
+            "shortfall_seconds": _t(self.shortfall),
+        }
+
+
+def plan_full_length(clean_start: float, tail_duration: float,
+                     verdict: Optional[DuplicationVerdict]) -> Optional[FullLengthPlan]:
+    """Place the measured copy window over the missing opening.
+
+    The map says the head was overwritten with content from
+    `first_match[1] .. last_match[1]`, so that same footage cut from the tail
+    covers the first `clean_start` seconds of the timeline. Nothing here is
+    guessed: with no map, or no matched blocks, there is no plan.
+    """
+    if verdict is None or not verdict.first_match or not verdict.last_match:
+        return None
+    needed = float(clean_start)
+    if needed < MIN_FULL_LENGTH_SECONDS or float(tail_duration) < MIN_FULL_LENGTH_SECONDS:
+        return None
+
+    content_start = float(verdict.first_match[1])
+    content_end = float(verdict.last_match[1])
+    available = max(0.0, content_end - content_start)
+    duration = min(needed, available, float(tail_duration))
+    if duration < MIN_FULL_LENGTH_SECONDS:
+        return None
+
+    # Tail second 0 is source second `clean_start`, so the copy begins that much
+    # earlier than the content time the map reports.
+    start = content_start - needed
+    start = min(max(0.0, start), max(0.0, float(tail_duration) - duration))
+    return FullLengthPlan(
+        start_in_tail=start,
+        duration=duration,
+        needed=needed,
+        available=available,
+        timeline_start=float(clean_start) + start,
+        timeline_end=float(clean_start) + start + duration,
+    )
+
+
+def _concat_entry(path: Path) -> str:
+    """A concat-demuxer line that survives spaces, quotes and Windows paths."""
+    text = str(path).replace("\\", "/").replace("'", "'\\''")
+    return f"file '{text}'"
+
+
+def rebuild_full_length(source: Path, tail_video: Path, plan: FullLengthPlan,
+                        target: Path, full_decode: bool = True,
+                        progress: Optional[ProgressCallback] = None) -> Dict[str, object]:
+    """Write a complete-length file: copied opening + clean tail + original audio.
+
+    Stream copies only, so the rebuild costs disk I/O and no re-encode. The
+    returned dict carries both the measurement and the caveat that this is a
+    rebuild which repeats later footage.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="nvidia-fix-rebuild-", dir=str(target.parent)
+    ) as work:
+        work_path = Path(work)
+        head = work_path / "head.mp4"
+        _notify(progress, f"Re-cutting the first {plan.duration:.3f} s from the copied footage…")
+        _run([
+            FFMPEG, "-hide_banner", "-v", "error", "-nostdin", "-y",
+            "-ss", f"{plan.start_in_tail:.6f}",
+            "-i", str(tail_video),
+            "-t", f"{plan.duration:.6f}",
+            "-map", "0:v:0", "-c", "copy",
+            "-avoid_negative_ts", "make_zero", str(head),
+        ], timeout=1800)
+
+        joined = work_path / "joined.mp4"
+        listing = work_path / "concat.txt"
+        listing.write_text(
+            "\n".join([_concat_entry(head), _concat_entry(Path(tail_video))]) + "\n",
+            encoding="utf-8",
+        )
+        _notify(progress, "Joining the rebuilt opening to the clean tail…")
+        _run([
+            FFMPEG, "-hide_banner", "-v", "error", "-nostdin", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(listing),
+            "-c", "copy", "-avoid_negative_ts", "make_zero", str(joined),
+        ], timeout=1800)
+
+        _notify(progress, "Muxing the original audio track over the whole rebuild…")
+        _run([
+            FFMPEG, "-hide_banner", "-v", "error", "-nostdin", "-y",
+            "-i", str(joined), "-i", str(source),
+            "-map", "0:v:0", "-map", "1:a:0?", "-c", "copy", "-shortest",
+            "-movflags", "+faststart", str(target),
+        ], timeout=1800)
+
+    info: Dict[str, object] = {}
+    try:
+        streams = _ffprobe_json([
+            "-show_entries", "stream=codec_type,duration,nb_frames",
+            "-of", "json", str(target),
+        ]).get("streams") or []
+    except NvidiaFixError:
+        streams = []
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
+    info.update({
+        "name": target.name,
+        "size_bytes": target.stat().st_size,
+        "video_duration_seconds": _t(_float(video.get("duration"), 0.0)),
+        "video_frames": int(_float(video.get("nb_frames"), 0)),
+        "audio_duration_seconds": _t(_float(audio.get("duration"), 0.0)) if audio else None,
+        "audio_frames": int(_float(audio.get("nb_frames"), 0)) if audio else None,
+    })
+    info.update(plan.to_dict())
+    info["caveat"] = FULL_LENGTH_CAVEAT
+    if full_decode:
+        _notify(progress, "Decoding the full-length rebuild to verify it…")
+        check = _decode_check(target)
+        info.update({
+            "decode_errors": len(check.errors),
+            "decode_error_sample": check.errors[:20],
+            "muxer_warnings": len(check.warnings),
+            "unclassified_output": check.unclassified[:5],
+        })
+    info["decode_checked"] = bool(full_decode)
+    return info
+
+
+def _full_length_block(source: Path, tail_video: Path, tail_duration: float,
+                       clean_start: float, verdict: Optional[DuplicationVerdict],
+                       destination: Path, base: str, full_decode: bool,
+                       progress: Optional[ProgressCallback]
+                       ) -> tuple[Dict[str, object], Optional[Path]]:
+    """Build the rebuild, or explain in the report why it cannot be built."""
+    if verdict is None:
+        return {
+            "skipped": "no duplication map beside the input, so the copy window "
+                       "that would fill the opening is unknown"
+        }, None
+    plan = plan_full_length(clean_start, tail_duration, verdict)
+    if plan is None:
+        return {"skipped": "the damaged prefix has no matched copy in this file"}, None
+
+    target = destination / f"{base}{FULL_LENGTH_SUFFIX}"
+    _notify(
+        progress,
+        f"Building the full-length rebuild: {plan.duration:.1f} s of copied "
+        "footage, then the clean tail, then the original audio…",
+    )
+    try:
+        info = rebuild_full_length(source, tail_video, plan, target,
+                                   full_decode=full_decode, progress=progress)
+    except NvidiaFixError as exc:
+        if target.exists():
+            target.unlink()
+        return {"error": str(exc)}, None
+    return info, target
+
+
+# --------------------------------------------------------------------------
 # main workflow
 # --------------------------------------------------------------------------
 
@@ -740,7 +952,8 @@ def _notify(progress: Optional[ProgressCallback], message: str) -> None:
 
 def process(path: str | Path, out_dir: Optional[str | Path] = None,
             full_decode: bool = True,
-            progress: Optional[ProgressCallback] = None) -> Dict[str, object]:
+            progress: Optional[ProgressCallback] = None,
+            full_length: bool = False) -> Dict[str, object]:
     source = Path(path).expanduser().resolve()
     _notify(progress, "Reading the container and scanning every video sample…")
     analysis = analyze(source)
@@ -851,12 +1064,22 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
     except NvidiaFixError:
         pass
     duplication: Optional[Dict[str, object]] = None
+    verdict: Optional[DuplicationVerdict] = None
     if analysis.last_bad is not None:
         try:
-            duplication = load_duplication_verdict(source, float(analysis.last_bad.pts)).to_dict()
+            verdict = load_duplication_verdict(source, float(analysis.last_bad.pts))
+            duplication = verdict.to_dict()
         except (NvidiaFixError, OSError, ValueError) as exc:
             # The recovery itself is unaffected; only the "why" is unavailable.
             duplication = {"unavailable": str(exc)}
+
+    full_length_info: Optional[Dict[str, object]] = None
+    full_length_out: Optional[Path] = None
+    if full_length:
+        full_length_info, full_length_out = _full_length_block(
+            source, video_out, duration, float(accepted.pts), verdict,
+            destination, base, full_decode, progress,
+        )
 
     report: Dict[str, object] = {
         **analysis_doc,
@@ -882,6 +1105,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             "attempts": attempts,
         },
         "duplication": duplication,
+        "full_length": full_length_info,
         "caveat": CAVEAT,
     }
     if decode_errors:
@@ -894,6 +1118,11 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             "The full decode produced output this tool could not classify. "
             "Inspect recovery.unclassified_output."
         )
+    if full_length_info and full_length_info.get("decode_errors"):
+        report["warning"] = (
+            "The clean tail verifies, but the full-length rebuild reported "
+            "decoder errors. Inspect full_length.decode_error_sample."
+        )
 
     _notify(progress, "Writing the recovery report…")
     report_out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -902,6 +1131,7 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
         "paths": {
             "video": str(video_out),
             "audio": str(audio_out) if audio_info else None,
+            "full_length": str(full_length_out) if full_length_out else None,
             "report": str(report_out),
         },
     }
@@ -969,6 +1199,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_fix.add_argument("--out", help="output directory (default: next to input)")
     p_fix.add_argument("--no-full-decode", action="store_true",
                        help="skip the full decode verification (faster)")
+    p_fix.add_argument("--full-length", action="store_true",
+                       help="also rebuild a complete-length file: the copied "
+                            "opening, then the clean tail, then the original audio")
     p_fix.add_argument("--json", action="store_true", help="print JSON")
 
     p_explain = sub.add_parser(
@@ -998,7 +1231,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         if args.command == "fix":
             result = process(args.input, out_dir=args.out,
-                             full_decode=not args.no_full_decode)
+                             full_decode=not args.no_full_decode,
+                             full_length=args.full_length)
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))
             elif result["status"] == "healthy":
@@ -1008,6 +1242,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"Clean tail   : {paths['video']}")
                 if paths.get("audio"):
                     print(f"Early audio  : {paths['audio']}")
+                if paths.get("full_length"):
+                    full = result.get("full_length") or {}
+                    print(f"Full-length  : {paths['full_length']}")
+                    print(f"               {full.get('video_duration_seconds', 0):.3f} s, "
+                          f"{full.get('video_frames', 0)} frames; first "
+                          f"{full.get('filled_seconds', 0):.3f} s repeats footage "
+                          f"from {full.get('timeline_start_seconds', 0):.3f}–"
+                          f"{full.get('timeline_end_seconds', 0):.3f} s (not the "
+                          "original opening)")
+                elif args.full_length:
+                    skipped = (result.get("full_length") or {}).get("skipped") \
+                        or (result.get("full_length") or {}).get("error") \
+                        or "not built"
+                    print(f"Full-length  : not built ({skipped})")
                 print(f"Report       : {paths['report']}")
                 print(f"Status       : {result['status']}")
                 decode = result["recovery"]["video"]["decode_errors"]
