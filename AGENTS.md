@@ -148,19 +148,47 @@ not file damage), no unclassified output, no retry attempts needed.
 - [x] Start at the earliest error-free keyframe: **13,680 @ 114.031811 s**.
       The old "13,651 @ 113.790 s" target was a 1-based/0-based `stss` mix-up;
       sample 13,651 is a 108-byte non-IDR slice, not video you can start on.
-- [ ] Add `--explain` (or `analyze` output) that runs the duplication check and
-      reports "N s duplicated / N s destroyed" so the app tells the truth
-      automatically instead of relying on a hand-written README. The dense map
-      already exists at `recovery/duplication_dense.json`; the work is wiring,
-      not new measurement.
-- [ ] Surface that verdict in `desktop.py` and the README's forensic section.
-- [x] Regression tests for the two bugs above (`tests/test_parsers.py`, 6 tests,
-      no ffmpeg required).
-- [ ] Still open: co64 fixture expectations and a duplication regression test
-      built from a synthesized prefix/tail pair.
-- [x] Commit + push (1.1.1, `2863c0d`).
+- [x] Add `--explain` (or `analyze` output) that runs the duplication check and
+      reports "N s duplicated / N s destroyed" (`71cfb0c`). The dense map lives
+      at `recovery/duplication_dense.json`; the work was wiring, not measurement.
+- [x] Surface that verdict in `desktop.py` and the README's forensic section
+      (`f000bc5`).
+- [x] Regression tests for the two bugs above (`tests/test_parsers.py`).
+- [x] co64 fixture expectations (`1f83b9c`).
+- [ ] Still open: a duplication regression test built from a synthesized
+      prefix/tail pair.
+- [x] Commit + push (1.1.1, `2863c0d`, then `a293e8f`).
+- [x] Donor hunt over every local drive: **no donor** (see session 4 log).
+- [x] Full-length (300.013 s) rebuild produced and verified — a rebuild, never
+      to be published as the original opening (see session 4 log).
 
 ## Mission log
+
+### 2026-10-31 — session 4: full-length rebuild + donor hunt closes the 100% question
+
+- **Full decode of the source's audio proves the audio is 100% intact** for
+  0–300.010 s: 143 stderr lines on the 0–113.782 s audio pass, every one `h264`
+  parser noise, **zero `aac`**.
+- **Deliverable built** (stream copy only, no re-encode):
+  `recovery/full-length/Arc_Raiders full-length rebuilt.mp4` (406.0 MB,
+  425,685,452 B) + `REPORT.json`. Video = clean-tail 68.508–182.538 s (the
+  footage the recorder wrote over the head = original content 182.54–296.57 s)
+  concatenated with the untouched tail from 114.031811 s; audio = the source's
+  own full track. Measured: video 300.013011 s / 36,002 frames, audio 300.010250 s
+  / 14,062 frames (the original count). Full decode: **one** line, the benign
+  `non monotonically increasing dts` muxer warning, 0 H.264 errors, 0 AAC errors.
+  Frames at 5/60/120/200/290 s are real gameplay. It is real footage and 100%
+  original audio, but its first 114 s is the duplicate content — **not** the
+  original opening, and never to be published as such.
+- **Donor hunt closed:** 9,220 media files >20 MB across C:, D:, E:, F: plus the
+  one C: shadow copy. `.DVR.BACKUP.mp4` is byte-identical to the corrupted file
+  (SHA-256 `18893EB7E5F78D23118F935564B64ED708A7A3191A21F3724F93AFAE4F4C9176`).
+  The 884.5 MB `.DVR.fixed.mp4` is green/blank (Y≈15, U/V≈130) for its first
+  ~114 s and matches this recording nowhere (PSNR 12–19 dB at every timestamp
+  tried) — a failed repair, not a donor. No second source exists locally.
+- Verdict unchanged and now fully searched: **0–113.782 s of the original video
+  is gone.** 62.1% of the frames are the in-file ceiling; 100% needs a donor that
+  is not on this machine.
 
 ### 2026-10-31 — session 3: the app reports duplicated vs destroyed
 

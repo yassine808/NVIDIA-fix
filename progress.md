@@ -6,10 +6,13 @@
 - [x] `explain`: split the damaged prefix into copied-later vs destroyed seconds (`71cfb0c`).
 - [x] Surface that verdict in the recovery report, `desktop.py` and the README (`f000bc5`).
 - [x] co64/stco fixture expectations (`1f83b9c`).
-- [ ] Donor hunt: search every local source for a copy of 0–113.782 s.
-      C: shadow copy (10/30 18:19) ruled out; whole-disk media scan was still
-      running when this entry was written (BelowNormal, pid 16540).
-- [ ] 100% mission: only a second source for 0–113.782 s can close it.
+- [x] Donor hunt: 9,220 media files >20 MB across C:, D:, E:, F: plus the one C:
+      shadow copy. **No donor.** The same-session `.DVR.BACKUP.mp4` is
+      byte-identical to the corrupted file (SHA-256 `18893EB7…`); the 884.5 MB
+      `.DVR.fixed.mp4` is green/blank for its first ~114 s and does not match
+      this recording at any timestamp (PSNR 12–19 dB against every candidate).
+- [x] Full-length deliverable built and verified (see the log entry below).
+- [ ] 100% of the *original* opening: impossible from every local source.
 
 ## Environment rules
 
@@ -17,6 +20,33 @@
   **BelowNormal** priority, `-threads 2` max, and **no GPU/hwaccel** paths.
 
 ## Log
+
+### 2026-10-31 — full-length build + donor hunt result
+
+- Goal: give Yassine a complete-length clip, and settle whether a second source
+  exists on this machine.
+- Done — full-length build: `recovery/full-length/Arc_Raiders full-length rebuilt.mp4`
+  (406.0 MB) with `REPORT.json` beside it. Video = 114.03 s of the footage the
+  recorder wrote over the head (clean-tail 68.508–182.538 s = original content
+  182.54–296.57 s) concatenated with the untouched tail from 114.031811 s; audio
+  = the source's own full track. Stream copies only, no re-encode.
+- Verified: video 300.013011 s / 36,002 frames, audio 300.010250 s / 14,062
+  frames (the original count); full decode at BelowNormal produced **one** line,
+  the benign `non monotonically increasing dts` muxer warning — 0 H.264 errors,
+  0 AAC errors. Frames at 5/60/120/200/290 s are real gameplay (PNG 60–95 KB),
+  and the early audio decodes clean (143 stderr lines, all h264, 0 aac).
+- Done — donor hunt: 9,220 media files >20 MB across all four drives. Only
+  same-session candidate is `D:\Videos\Arc Raiders\…19.06.32.02.DVR.fixed.mp4`
+  (884.5 MB, 300.19 s, 36,023 frames): green/blank frames for the first ~114 s
+  (Y≈15, U/V≈130) and PSNR 12–19 dB against this recording at every timestamp
+  tried, i.e. a failed repair, not a donor. `.DVR.BACKUP.mp4` hashes identical to
+  `recovery/Arc_Raiders corrupted.mp4`.
+- Honest statement: 0–113.782 s of the original video does not exist in any local
+  file. The full-length build is real footage and 100% original audio, but its
+  first 114 s is the duplicate content, not the original opening. It must never
+  be published as a recovered original.
+- Next: nothing in flight. If a donor ever appears, the acceptance test is the
+  documented one (joins at frame 13,680, frame-exact, full decode 0 errors).
 
 ### 2026-10-31 — verdict in the app, co64 fixtures, donor hunt
 
