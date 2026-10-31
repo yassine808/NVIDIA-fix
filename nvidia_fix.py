@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 TOOL = "nvidia-fix"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 FFMPEG = os.environ.get("FFMPEG_BINARY", "ffmpeg")
 FFPROBE = os.environ.get("FFPROBE_BINARY", "ffprobe")
@@ -424,17 +424,77 @@ def _unique_base(out_dir: Path, stem: str, audio_ext: str) -> str:
     return base
 
 
-def _decode_errors(path: Path, seconds: Optional[float] = None,
-                   timeout: int = 1800) -> List[str]:
+# Messages from ffmpeg's null muxer about timestamps. ShadowPlay records 120 fps
+# with B-frames, so the decoder hands the muxer repeated dts values and the null
+# muxer complains. That is a property of the verification command, not damage in
+# the recovered file, so it must not reject a clean cut.
+_MUXER_WARNING_MARKERS = (
+    "non monotonically increasing dts",
+    "non-monotonous dts",
+)
+
+# Messages that mean the bitstream itself did not decode.
+_DECODER_ERROR_MARKERS = (
+    "error while decoding",
+    "corrupt decoded frame",
+    "invalid nal unit",
+    "no frame!",
+    "non-existing pps",
+    "non-existing sps",
+    "illegal short term buffer state",
+    "illegal reordering_of_pic_nums_idc",
+    "decode_slice_header error",
+    "error splitting the input",
+    "invalid data found when processing input",
+    "packet corrupt",
+    "header missing",
+    "concealing",
+    "frame num change",
+)
+
+
+@dataclass
+class DecodeCheck:
+    """Decoder verdict plus the warnings that are not the file's fault."""
+
+    errors: List[str]
+    warnings: List[str]
+    unclassified: List[str]
+    returncode: int
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0 and not self.errors
+
+
+def _classify_stderr(lines: Sequence[str]) -> DecodeCheck:
+    errors: List[str] = []
+    warnings: List[str] = []
+    unclassified: List[str] = []
+    for line in lines:
+        low = line.lower()
+        if any(marker in low for marker in _MUXER_WARNING_MARKERS):
+            warnings.append(line)
+        elif any(marker in low for marker in _DECODER_ERROR_MARKERS):
+            errors.append(line)
+        else:
+            unclassified.append(line)
+    return DecodeCheck(errors, warnings, unclassified, returncode=0)
+
+
+def _decode_check(path: Path, seconds: Optional[float] = None,
+                  timeout: int = 1800) -> DecodeCheck:
     cmd = [FFMPEG, "-hide_banner", "-v", "error", "-nostdin", "-i", str(path)]
     if seconds is not None:
         cmd += ["-t", f"{seconds:.3f}"]
     cmd += ["-map", "0:v:0", "-f", "null", "-"]
     result = _run(cmd, check=False, timeout=timeout)
     lines = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
+    check = _classify_stderr(lines)
+    check.returncode = result.returncode
     if result.returncode != 0 and not lines:
-        lines = [f"ffmpeg exited with {result.returncode}"]
-    return lines
+        check.errors.append(f"ffmpeg exited with {result.returncode}")
+    return check
 
 
 def _cut_tail(source: Path, candidate: Sample, target: Path,
@@ -578,12 +638,15 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
                 attempts.append({"seconds": _t(candidate.pts), "error": check.get("reason")})
                 continue
             _notify(progress, "Checking the first seconds of the recovered video…")
-            first_errors = _decode_errors(temp, DECODE_VALIDATE_SECONDS)
-            if first_errors:
+            start_check = _decode_check(temp, DECODE_VALIDATE_SECONDS)
+            if not start_check.ok:
+                blocking = start_check.errors or start_check.unclassified or [
+                    f"ffmpeg exited with {start_check.returncode}"
+                ]
                 attempts.append({
                     "seconds": _t(candidate.pts),
                     "error": "decode errors at start of cut",
-                    "details": first_errors[:5],
+                    "details": blocking[:5],
                 })
                 continue
             os.replace(temp, video_out)
@@ -615,10 +678,11 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
                 audio_out.unlink()
             audio_info = None
 
-    decode_errors: List[str] = []
+    decode_check = DecodeCheck([], [], [], returncode=0)
     if full_decode:
         _notify(progress, "Decoding the recovered video to verify it…")
-        decode_errors = _decode_errors(video_out)
+        decode_check = _decode_check(video_out)
+    decode_errors = decode_check.errors
 
     duration = _probe_duration(video_out)
     try:
@@ -628,7 +692,8 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
         pass
     report: Dict[str, object] = {
         **analysis_doc,
-        "status": "success" if not decode_errors else "success_with_warnings",
+        "status": "success" if decode_check.ok and not decode_check.unclassified
+        else "success_with_warnings",
         "recovery": {
             "clean_start_seconds": _t(accepted.pts),
             "video": {
@@ -642,6 +707,10 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
             },
             "audio": audio_info,
             "decode_error_sample": decode_errors[:20],
+            "muxer_warnings": len(decode_check.warnings),
+            "muxer_warning_sample": decode_check.warnings[:3],
+            "unclassified_output": decode_check.unclassified[:5],
+            "full_decode_returncode": decode_check.returncode,
             "attempts": attempts,
         },
         "caveat": CAVEAT,
@@ -650,6 +719,11 @@ def process(path: str | Path, out_dir: Optional[str | Path] = None,
         report["warning"] = (
             "The tail was recovered and its first packets verify, but a full "
             "decode reported errors. Inspect the decode_error_sample list."
+        )
+    elif decode_check.unclassified:
+        report["warning"] = (
+            "The full decode produced output this tool could not classify. "
+            "Inspect recovery.unclassified_output."
         )
 
     _notify(progress, "Writing the recovery report…")
@@ -737,6 +811,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"Status       : {result['status']}")
                 decode = result["recovery"]["video"]["decode_errors"]
                 print(f"Decode errors: {decode}")
+                warnings = result["recovery"].get("muxer_warnings") or 0
+                if warnings:
+                    print(f"Muxer warning: {warnings} timestamp warning(s) (not file damage)")
             return 0
 
         if args.command == "serve":

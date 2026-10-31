@@ -102,8 +102,14 @@ def parse_stts(buf: bytes, s: int, e: int) -> List[Tuple[int, int]]:
 
 
 def parse_stss(buf: bytes, s: int, e: int) -> List[int]:
+    """Sync sample numbers from `stss`.
+
+    ISO/IEC 14496-12 stores these **1-based** (first sample of the track is 1).
+    Convert to 0-based indices so they line up with `intervals`, `stts` and
+    ffprobe's packet indices; mixing the two once produced a false boundary.
+    """
     count = struct.unpack(">I", buf[s + 4:s + 8])[0]
-    return list(struct.unpack(">%dI" % count, buf[s + 8:s + 8 + 4 * count]))
+    return [n - 1 for n in struct.unpack(">%dI" % count, buf[s + 8:s + 8 + 4 * count])]
 
 
 def parse_mdhd(buf: bytes, s: int, e: int) -> Dict[str, Any]:

@@ -40,12 +40,34 @@ python forensics/boundary_find.py      # exact last damaged / first clean sample
 python forensics/content_match.py      # thumbnail cross-time matching
 ```
 
-## Mission status: SOLVED — 100% is provably impossible from this file
+## Mission goal: 100% of the recording (ACTIVE)
 
-Input: `recovery/Arc_Raiders corrupted.mp4` (439,194,252 bytes, ShadowPlay).
-Goal was to recover 100% of the ~300 s of footage. Result: **62.1% (186.21 s) is
-recoverable; 37.9% (113.78 s) was overwritten in place and no longer exists in
-this file.**
+**The goal is 100% recovery of `recovery/Arc_Raiders corrupted.mp4`: all 35,998
+frames / 300.013 s of video, not a 62% tail.**
+
+Yassine reopened this on 2026-10-31. The earlier entry closed the project at the
+in-file ceiling; that ceiling is a measurement of *this file*, not of the goal.
+The goal stays open until either (a) all 300 s exist as playable, verified video,
+or (b) every plausible second source has been searched and ruled out in writing.
+
+### What this file can and cannot give
+
+Measured ceiling from this file alone: **62.1% (22,347 frames / 186.21 s) is
+intact; the other 37.9% (113.78 s) was overwritten in place and is not present
+anywhere in these 439,194,252 bytes.** So 100% cannot come from re-parsing this
+file. It can only come from a **second source** for 0–113.782 s:
+
+1. The original ShadowPlay file from before the overwrite (check the ShadowPlay
+   folder, temp folder, and any backup/OneDrive/Recycle Bin copy).
+2. A re-encode or upload of the same session (YouTube/Twitch VOD, Discord,
+   WhatsApp, Google Photos, phone export).
+3. Another clip from the same play session that covers 0–114 s.
+
+Until a source is supplied, the honest deliverable is the recovered tail plus
+early audio. **Never present a reconstruction as the original footage** (line 8).
+If a second source arrives, the acceptance test is: the donor's 0–113.782 s
+joins the recovered tail at frame 13,680 with frame-exact continuity and a full
+decode reporting zero decoder errors.
 
 ### Evidence chain (all reproducible)
 
@@ -81,8 +103,12 @@ Independent confirmation from the decoder: per-30 s segment decode gives
 2,116 / 1,545 / 959 / 522 frames for 0–120 s (expected 3,600 each) and exactly
 3,601 for every segment from 120 s to 300 s.
 
-Exact boundary (`boundary_find.py`): last damaged sample **13,650 @ 113.782 s**,
-first clean sample **13,651 @ 113.790 s**, which is also a keyframe.
+Exact boundary (`boundary_find.py`): last damaged sample **13,650 @ 113.782 s**;
+first AVCC-valid sample **13,651 @ 113.790 s**, which is *not* decodable video (it
+is a 108-byte non-IDR slice). The first clean **keyframe** is **13,680 @
+114.032 s** — the earliest point a stream copy can start. `stss` entries are
+1-based in ISO BMFF; reading them as 0-based is what once put the boundary at
+13,651 (fixed in `parse_stss`).
 
 ### What would make 100% possible
 
@@ -94,32 +120,76 @@ invent overwritten media.
 
 ### Verified deliverable
 
-`nvidia_fix.py fix` already produces:
-`recovery/out/Arc_Raiders corrupted.clean.mp4` — 185.73 s, 265.7 MB, 22,288
-packets, stream-copied from keyframe 114.28 s, plus 114.29 s of recovered early
-audio and a JSON report.
+`nvidia_fix.py fix` produces
+`recovery/out_v2/Arc_Raiders corrupted.clean.mp4` — **185.981 s, 266,260,199 B,
+22,318 packets**, stream-copied from keyframe 13,680 @ 114.031811 s, plus 114.03 s
+of recovered early audio and a JSON report. Verified 2026-10-31: `status:
+success`, first-packet SHA matches the source sample, **0 decoder errors**,
+1,455 null-muxer dts warnings (timestamp noise from the verification command,
+not file damage), no unclassified output, no retry attempts needed.
 
 ## Plan
 
 - [x] Push the pending 1.1.0 work to `origin/main`.
 - [x] Create `recovery/` workspace and move the input recording into it.
 - [x] Build the forensics toolkit (9 scripts) and run the full evidence chain.
-- [x] Decide the ceiling: **186.21 s / 62.1% of frames; 100% impossible.**
+- [x] Decide the in-file ceiling: **186.21 s / 62.1% of frames.** The 100% goal
+      stays open and can only be met with a second source (see above).
 - [x] Produce and inspect a maximum-length recovery with the existing engine.
-- [ ] Fix the verifier: `non monotonically increasing dts` is a muxer warning,
-      not a decode error. It currently rejects a good keyframe at 114.03 s and
-      labels a clean recovery `success_with_warnings`.
-- [ ] Make the engine start at the true boundary (13,651 @ 113.790 s) instead of
-      13,680, and/or pick the earliest keyframe whose decode is error-free.
+- [x] Fix the verifier: classify ffmpeg stderr instead of treating every line as
+      a decode error. `non monotonically increasing dts` is now recorded as
+      `recovery.muxer_warnings` and no longer rejects a clean cut; decoder and
+      corruption messages still block, and unknown output sets
+      `success_with_warnings` instead of being swallowed.
+- [x] Start at the earliest error-free keyframe: **13,680 @ 114.031811 s**.
+      The old "13,651 @ 113.790 s" target was a 1-based/0-based `stss` mix-up;
+      sample 13,651 is a 108-byte non-IDR slice, not video you can start on.
 - [ ] Add `--explain` (or `analyze` output) that runs the duplication check and
       reports "N s duplicated / N s destroyed" so the app tells the truth
-      automatically instead of relying on a hand-written README.
+      automatically instead of relying on a hand-written README. The dense map
+      already exists at `recovery/duplication_dense.json`; the work is wiring,
+      not new measurement.
 - [ ] Surface that verdict in `desktop.py` and the README's forensic section.
-- [ ] Update tests: fix the fixture expectations for co64, add a duplication
-      regression test using a synthesized prefix/tail pair.
+- [x] Regression tests for the two bugs above (`tests/test_parsers.py`, 6 tests,
+      no ffmpeg required).
+- [ ] Still open: co64 fixture expectations and a duplication regression test
+      built from a synthesized prefix/tail pair.
 - [ ] Commit + push.
 
 ## Mission log
+
+### 2026-10-31 — session 2 (goal reopened to 100%)
+
+- Yassine reopened the mission: the goal is 100% of the 300 s, not the 62% tail.
+  The in-file ceiling (186.21 s intact / 113.78 s overwritten) is recorded as a
+  measurement of *this file*, and the only route to 100% is a second source.
+- **Verifier bug, fixed.** `_decode_errors` counted every ffmpeg stderr line as a
+  decode error. Measured: a full decode of the 114.03 s cut emits 2,902 lines,
+  all of them `[null @ …] … non monotonically increasing dts to muxer`, and
+  **zero** decoder messages. The tool rejected keyframe 13,680 and then reported
+  a clean recovery as `success_with_warnings`. stderr is now classified
+  (`_classify_stderr` / `DecodeCheck`): decoder + corruption markers block,
+  muxer timestamp warnings are counted and ignored, unknown output sets a
+  warning status instead of disappearing.
+- **Boundary bug, fixed.** `parse_stss` returned `stss` entries raw, but ISO BMFF
+  numbers sync samples from 1. My own note "first clean sample 13,651 is a
+  keyframe" was this bug: sample 13,651 is a 108-byte non-IDR slice. The first
+  clean keyframe is **13,680 @ 114.031811 s**, which is what `README.md` already
+  said and what the engine now uses.
+- **I/O bug, fixed.** `sample_map.Reader` anchored its 16 MiB window on the
+  requested offset, so a backwards scan missed the cache every time:
+  22k samples × 16 MiB ≈ 350 GB. Anchored on a window boundary instead;
+  `boundary_find.py` went from hours to **1.2 s**.
+- **Fresh recovery:** `recovery/out_v2/Arc_Raiders corrupted.clean.mp4` —
+  185.981 s, 266,260,199 B, 22,318 packets, clean start 114.031811 s,
+  `status: success`, 0 decoder errors, 1,455 muxer warnings, 0 retries,
+  first-packet SHA == source sample SHA.
+- Tests: new `tests/test_parsers.py` (6 fast regressions). Real-file test passes
+  against the new engine (71.8 s). `tests/test_app.py` still cannot run locally:
+  no Flask, no pytest in this environment.
+- Still open: `--explain` duplication verdict, surfacing it in `desktop.py` and
+  the README, the co64 fixture + duplication regression test, and finding a
+  donor source for 0–113.782 s (the only path to 100%).
 
 ### 2026-10-30 — session 1
 

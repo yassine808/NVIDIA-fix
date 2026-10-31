@@ -38,10 +38,18 @@ class Reader:
             return b""
         end = min(off + n, self.size)
         if not (self.start <= off and end <= self.start + len(self.buf)):
-            self.fh.seek(off)
-            want = max(n, self.window)
-            self.buf = self.fh.read(min(want, self.size - off))
-            self.start = off
+            if n > self.window:
+                start = off
+            else:
+                # Anchor the cache on a window boundary, not on `off`. Anchoring
+                # on `off` meant a backwards scan (every next offset smaller than
+                # the last) missed the cache every time and re-read the window:
+                # 22k samples x 16 MiB = ~350 GB of I/O on this recording.
+                start = (off // self.window) * self.window
+            limit = min(self.size, max(start + self.window, end))
+            self.fh.seek(start)
+            self.buf = self.fh.read(limit - start)
+            self.start = start
         a = off - self.start
         return self.buf[a:a + (end - off)]
 
