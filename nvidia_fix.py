@@ -411,6 +411,161 @@ def analyze(path: str | Path) -> Analysis:
 
 
 # --------------------------------------------------------------------------
+# duplication verdict
+# --------------------------------------------------------------------------
+
+DUPLICATION_MAP_NAME = "duplication_dense.json"
+
+
+@dataclass
+class DuplicationVerdict:
+    """How much of the unreadable prefix is a copy of later bytes.
+
+    The recorder overwrote the head of the file with a later stretch of the same
+    stream, so the bytes before the clean start are not missing — most of them
+    exist again further on. Only `destroyed_seconds` is gone for good, and only
+    a second source can replace it.
+    """
+
+    damaged_seconds: float
+    duplicated_seconds: float
+    destroyed_seconds: float
+    scan_blocks: int
+    matched_blocks: int
+    first_match: Optional[tuple]
+    last_match: Optional[tuple]
+    map_path: Optional[Path] = None
+
+    @property
+    def matched_fraction(self) -> float:
+        return self.matched_blocks / self.scan_blocks if self.scan_blocks else 0.0
+
+    @property
+    def duplicated_fraction(self) -> float:
+        if not self.damaged_seconds:
+            return 0.0
+        return self.duplicated_seconds / self.damaged_seconds
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "damaged_seconds": _t(self.damaged_seconds),
+            "duplicated_seconds": _t(self.duplicated_seconds),
+            "destroyed_seconds": _t(self.destroyed_seconds),
+            "duplicated_fraction": round(self.duplicated_fraction, 4),
+            "scan_blocks": self.scan_blocks,
+            "matched_blocks": self.matched_blocks,
+            "matched_fraction": round(self.matched_fraction, 4),
+            "first_match": list(self.first_match) if self.first_match else None,
+            "last_match": list(self.last_match) if self.last_match else None,
+            "map": str(self.map_path) if self.map_path else None,
+        }
+
+
+def duplication_verdict(rows: Sequence[Dict[str, object]], damaged_seconds: float,
+                        map_path: Optional[Path] = None) -> DuplicationVerdict:
+    """Split the damaged prefix into copied-later and destroyed seconds.
+
+    `rows` is the block list from `duplication_dense.json`: one entry per 256 KiB
+    block, ordered by file offset, each with the container time `t` it starts at.
+    A block therefore owns the time up to the next block's `t`. Blocks past
+    `damaged_seconds` are clean footage that simply has no copy in the file, so
+    they are clipped out of the second counts — but they stay in the block
+    denominator, which is what `duplication_dense.py` itself reports.
+    """
+    timed = [row for row in rows if row.get("t") is not None]
+    if not timed:
+        raise NvidiaFixError(
+            "The duplication map has no timed blocks; regenerate it with "
+            "`python forensics/duplication_dense.py`."
+        )
+
+    # A block owns the time up to the next block. The last block has no next one,
+    # so it inherits the median span — 256 KiB blocks cover a near-constant slice
+    # of this recording, and dropping it instead would silently lose seconds.
+    starts = [float(row["t"]) for row in timed]
+    gaps = sorted(b - a for a, b in zip(starts, starts[1:]) if b > a)
+    tail_span = gaps[len(gaps) // 2] if gaps else 0.0
+
+    duplicated = 0.0
+    destroyed = 0.0
+    for index, row in enumerate(timed):
+        start = starts[index]
+        end = starts[index + 1] if index + 1 < len(starts) else start + tail_span
+        lo, hi = start, min(end, damaged_seconds)
+        if hi <= lo:
+            continue
+        if row.get("matched"):
+            duplicated += hi - lo
+        else:
+            destroyed += hi - lo
+
+    matched = [row for row in timed if row.get("matched")]
+    first = last = None
+    if matched:
+        first = (float(matched[0]["t"]), float(matched[0]["src_t"]))
+        last = (float(matched[-1]["t"]), float(matched[-1]["src_t"]))
+    return DuplicationVerdict(
+        damaged_seconds=damaged_seconds,
+        duplicated_seconds=duplicated,
+        destroyed_seconds=destroyed,
+        scan_blocks=len(timed),
+        matched_blocks=len(matched),
+        first_match=first,
+        last_match=last,
+        map_path=map_path,
+    )
+
+
+def explain(path: str | Path, map_path: Optional[str | Path] = None) -> Dict[str, object]:
+    """Report what the damaged prefix is: copied later, or destroyed.
+
+    Requires the map produced by `forensics/duplication_dense.py` — it is a
+    measurement, not something this engine should re-derive with a coarser scan
+    and then quote as if it were the same number.
+    """
+    analysis = analyze(path)
+    result: Dict[str, object] = {
+        "tool": TOOL,
+        "version": VERSION,
+        "input": str(analysis.path),
+    }
+    if analysis.healthy or analysis.last_bad is None:
+        result.update({"status": "healthy", "verdict": "No corruption: the file is intact."})
+        return result
+
+    duration = _probe_duration(analysis.path)
+    damaged = float(analysis.last_bad.pts)
+    target = Path(map_path).expanduser() if map_path else analysis.path.parent / DUPLICATION_MAP_NAME
+    if not target.is_file():
+        raise NvidiaFixError(
+            f"No duplication map at {target}. Generate it with:\n"
+            f"  PYTHONPATH=forensics python forensics/duplication_dense.py"
+        )
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    verdict = duplication_verdict(payload.get("rows") or [], damaged, target)
+
+    recoverable = max(0.0, duration - damaged)
+    result.update({
+        "status": analysis.status,
+        "duplication": verdict.to_dict(),
+        "timeline": {
+            "duration_seconds": _t(duration),
+            "damaged_seconds": _t(damaged),
+            "recoverable_seconds": _t(recoverable),
+            "recoverable_fraction": round(recoverable / duration, 4) if duration else 0.0,
+            "unique_seconds": _t(max(0.0, duration - verdict.duplicated_seconds)),
+        },
+        "verdict": (
+            f"{verdict.duplicated_seconds:.3f} s of the damaged prefix is a byte-shifted "
+            f"copy of later footage and {verdict.destroyed_seconds:.3f} s exists nowhere "
+            f"in the file. Only {recoverable:.3f} s of the {duration:.3f} s timeline is "
+            "playable; 100% needs a second source."
+        ),
+    })
+    return result
+
+
+# --------------------------------------------------------------------------
 # cutting / verification
 # --------------------------------------------------------------------------
 
@@ -761,6 +916,28 @@ def _print_analysis(analysis: Analysis) -> None:
     print(analysis.warning)
 
 
+def _print_explain(result: Dict[str, object]) -> None:
+    if result.get("status") == "healthy":
+        print(result["verdict"])
+        return
+    verdict = result["duplication"]
+    timeline = result["timeline"]
+    print(f"Input          : {result['input']}")
+    print(f"Damaged prefix : {verdict['damaged_seconds']:.3f} s")
+    print(f"  copied later : {verdict['duplicated_seconds']:.3f} s "
+          f"({100 * verdict['duplicated_fraction']:.1f}% of the prefix, "
+          f"{100 * verdict['matched_fraction']:.1f}% of the scanned blocks)")
+    print(f"  destroyed    : {verdict['destroyed_seconds']:.3f} s")
+    if verdict["first_match"]:
+        print(f"  copy window  : container {verdict['first_match'][0]:.2f} s -> content "
+              f"{verdict['first_match'][1]:.2f} s ... container "
+              f"{verdict['last_match'][0]:.2f} s -> content {verdict['last_match'][1]:.2f} s")
+    print(f"Recoverable    : {timeline['recoverable_seconds']:.3f} s of "
+          f"{timeline['duration_seconds']:.3f} s "
+          f"({100 * timeline['recoverable_fraction']:.1f}%)")
+    print(f"Verdict        : {result['verdict']}")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="nvidia_fix.py",
@@ -779,6 +956,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_fix.add_argument("--no-full-decode", action="store_true",
                        help="skip the full decode verification (faster)")
     p_fix.add_argument("--json", action="store_true", help="print JSON")
+
+    p_explain = sub.add_parser(
+        "explain",
+        help="report how much of the damaged prefix is a copy of later footage",
+    )
+    p_explain.add_argument("input")
+    p_explain.add_argument("--map",
+                           help="duplication map JSON (default: "
+                                f"{DUPLICATION_MAP_NAME} next to the input)")
+    p_explain.add_argument("--json", action="store_true", help="print JSON")
 
     p_serve = sub.add_parser("serve", help="start the local web app")
     p_serve.add_argument("--host", default="127.0.0.1")
@@ -814,6 +1001,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 warnings = result["recovery"].get("muxer_warnings") or 0
                 if warnings:
                     print(f"Muxer warning: {warnings} timestamp warning(s) (not file damage)")
+            return 0
+
+        if args.command == "explain":
+            result = explain(args.input, map_path=args.map)
+            if args.json:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                _print_explain(result)
             return 0
 
         if args.command == "serve":
